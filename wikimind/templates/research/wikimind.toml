@@ -1,0 +1,27 @@
+[project]
+name = "{{PROJECT_NAME}}"
+template = "research"
+
+[paths]
+raw = ".wiki/raw/"
+wiki = ".wiki/vault/"
+
+[llm]
+provider = "anthropic"  # anthropic | openai | ollama
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+# base_url = ""
+# max_tokens_per_call = 8192
+# max_budget_usd = 5.0  # Uncomment to set a per-session spending cap
+
+[wiki]
+required_frontmatter = ["title", "type", "tags", "created", "updated"]
+retrieval_backend = "bm25"  # bm25 | index_keyword
+
+[wiki.categories]
+papers = "Academic papers, preprints, technical reports"
+concepts = "Theories, methods, frameworks, algorithms"
+authors = "Researchers, labs, institutions"
+datasets = "Datasets, benchmarks, corpora"
+sources = "One summary per raw source"
+analyses = "Literature reviews, comparisons, syntheses"

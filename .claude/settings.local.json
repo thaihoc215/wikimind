@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m venv .venv)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -v)",
+      "Bash(.venv/Scripts/wikimind --help)",
+      "Read(//tmp/**)",
+      "Read(//tmp/wikimind-test/**)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -v --tb=short)",
+      "Bash(.venv/Scripts/python -c \"from wikimind.server import create_server; print\\('server import OK'\\)\")",
+      "Bash(.venv/Scripts/wikimind serve:*)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_server.py -v)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

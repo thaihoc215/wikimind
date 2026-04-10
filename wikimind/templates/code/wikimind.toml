@@ -1,0 +1,27 @@
+[project]
+name = "{{PROJECT_NAME}}"
+template = "code"
+
+[paths]
+raw = ".wiki/raw/"
+wiki = ".wiki/vault/"
+
+[llm]
+provider = "anthropic"  # anthropic | openai | ollama
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+# base_url = ""
+# max_tokens_per_call = 8192
+# max_budget_usd = 5.0  # Uncomment to set a per-session spending cap
+
+[wiki]
+required_frontmatter = ["title", "type", "tags", "created", "updated"]
+retrieval_backend = "bm25"  # bm25 | index_keyword
+
+[wiki.categories]
+modules = "Source files, classes, functions, components"
+apis = "Endpoints, interfaces, contracts, schemas"
+patterns = "Design patterns, architectural decisions, conventions"
+decisions = "Architecture Decision Records (ADRs)"
+sources = "One summary per raw source"
+analyses = "Saved queries, comparisons, syntheses"

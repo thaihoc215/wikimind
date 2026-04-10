@@ -1,0 +1,27 @@
+[project]
+name = "{{PROJECT_NAME}}"
+template = "book"
+
+[paths]
+raw = ".wiki/raw/"
+wiki = ".wiki/vault/"
+
+[llm]
+provider = "anthropic"  # anthropic | openai | ollama
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+# base_url = ""
+# max_tokens_per_call = 8192
+# max_budget_usd = 5.0  # Uncomment to set a per-session spending cap
+
+[wiki]
+required_frontmatter = ["title", "type", "tags", "created", "updated"]
+retrieval_backend = "bm25"  # bm25 | index_keyword
+
+[wiki.categories]
+chapters = "Chapter summaries and key events"
+characters = "Character profiles and development arcs"
+themes = "Major themes, motifs, and symbols"
+quotes = "Notable passages and excerpts"
+sources = "One summary per raw source"
+analyses = "Saved queries, character analyses, thematic studies"
