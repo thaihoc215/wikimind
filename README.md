@@ -1,419 +1,353 @@
 # WikiMind
 
 An LLM-powered wiki that maintains itself. Drop in source files, ask questions,
-get a structured, interlinked knowledge base that grows richer with every source
-you add.
+get a structured, interlinked knowledge base that grows richer with every source you add.
 
-> Inspired by [Andrej Karpathy's LLM wiki idea](idea.md): instead of re-deriving
-> knowledge from raw documents on every question (RAG), the LLM incrementally
-> builds and maintains a persistent wiki. The wiki is a compounding artifact.
+> Inspired by [Andrej Karpathy's LLM wiki idea](idea.md): instead of re-deriving knowledge
+> from raw documents on every question (RAG), the LLM incrementally builds and maintains a
+> persistent wiki. The wiki is a **compounding artifact**.
 
 ---
 
 ## How it works
 
 ```
-Raw sources (you add)   →   Wiki (LLM writes)   →   You read + explore
-      raw/                      wiki/                   Obsidian / any editor
+Raw sources (you add)  →  Wiki (LLM writes)  →  You read + explore
+      .wiki/raw/               .wiki/vault/          Obsidian / any editor
 ```
 
 Three layers:
-1. **`.wiki/raw/`** — your source documents (articles, papers, notes). Immutable — LLM reads, never modifies.
-2. **`.wiki/vault/`** — LLM-generated markdown files: summaries, entity pages, concept pages, cross-references.
-3. **`CLAUDE.md`** — the "schema": tells the LLM how the wiki is structured and what conventions to follow.
+1. **`.wiki/raw/`** — your source documents (articles, papers, notes). LLM reads, never modifies.
+2. **`.wiki/vault/`** — LLM-generated markdown: summaries, entity pages, concept pages, cross-references.
+3. **Schema/instructions file** — tells the AI how the wiki is structured and what conventions to follow.
+   - Claude Code → `CLAUDE.md`
+   - GitHub Copilot → `.github/copilot-instructions.md`
+   - OpenCode / Cursor / others → `AGENTS.md` or tool-specific equivalent
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture, data flows, and MCP tool workflows.
+   `wikimind init` generates `CLAUDE.md` by default. Copy or symlink as needed for your tool.
 
 ---
 
 ## Two modes
 
-### Mode A — Claude Code + MCP (no API key needed)
-
-Open your project in Claude Code. WikiMind registers as an MCP server via
-`.mcp.json`. Claude Code reads `CLAUDE.md`, understands the wiki structure, and
-uses MCP tools (`wiki_read_page`, `wiki_write_page`, etc.) to maintain the wiki
-as part of its normal work.
-
-**Claude Code IS the LLM** — no separate `ANTHROPIC_API_KEY` required.
-
-### Mode B — CLI (standalone; API key may be needed)
-
-Use `wikimind ingest/query/lint` commands directly from the terminal. WikiMind
-calls your configured provider on your behalf (`anthropic`, `openai`, or
-`ollama`). API key requirements depend on provider.
+| Mode | How | API key? |
+|------|-----|----------|
+| **A — MCP (any AI assistant)** | Your AI client reads the schema file and uses WikiMind MCP tools (`wiki_read_page`, `wiki_write_page`, etc.) to maintain the wiki as part of its normal work. Works with Claude Code, GitHub Copilot, Cursor, OpenCode, and any MCP-compatible client. | Not needed for Claude Code; depends on client for others |
+| **B — CLI standalone** | Run `wikimind ingest/query/lint` directly. WikiMind calls your configured LLM provider. | Depends on provider |
 
 Both modes write to the same wiki directory and are fully compatible.
-
-Default hidden layout created by `wikimind init`:
-- `.wiki/raw/` — immutable sources
-- `.wiki/vault/` — LLM-maintained wiki pages
-- `.wiki/.wikimind/` — operational metadata
 
 ---
 
 ## Installation
 
-### Development install (editable)
+### From source (development)
 
 ```bash
-# Clone and set up virtual environment
 git clone <repo>
 cd wikimind
-python -m venv .venv
+python -m venv .venv # macOS / Linux
+py -m venv .venv # Windows
 
-# Activate venv
-source .venv/bin/activate       # macOS/Linux
-.venv\Scripts\activate          # Windows
+# Activate
+source .venv/bin/activate        # macOS / Linux / Git Bash
+source .venv/Scripts/activate           # Windows PowerShell / cmd
 
-# Install
 pip install -e .
+pip install -e ".[pdf]"          # optional: adds PDF ingestion support
 ```
 
-This mode links the installed command to your source checkout.
-
-### Using `wikimind` across different project folders
-
-After a development install, the `wikimind` command only works when the venv is
-active. If you `cd` to another project and the venv is not active, you'll get
-`command not found`.
-
-**Option A — Activate the venv before switching folders (per-session):**
+The `wikimind` command works while the venv is active. To use it across all your
+projects without activating a venv every session, install via `pipx` instead:
 
 ```bash
-# Activate once per terminal session
-source ~/Desktop/project/wikimind/.venv/Scripts/activate   # Git Bash / macOS / Linux
-# or
-source ~/Desktop/project/wikimind/.venv/bin/activate       # macOS / Linux
-
-# Now wikimind works anywhere in this session
-cd ~/my-other-project
-wikimind init
-```
-
-**Option B — Install globally with `pipx` (recommended, permanent):**
-
-```bash
-# Install pipx if you don't have it
 pip install pipx
-
-# Install wikimind globally from your local repo (editable)
-pipx install -e ~/Desktop/project/wikimind
-
-# wikimind is now available everywhere, always — no venv activation needed
-cd ~/my-other-project
-wikimind init
+pipx install -e ~/path/to/wikimind   # permanent global CLI
 ```
 
-`pipx` creates an isolated environment just for the `wikimind` CLI and adds it
-to your system PATH permanently. This is the cleanest approach for CLI tools you
-want to use across projects.
+### From a wheel (distribute to other machines)
 
-### Install without source checkout (local/other machine)
-
-Build a distributable wheel once:
+Build once from the repo:
 
 ```bash
 python -m pip install --upgrade build
 python -m build
-# -> dist/wikimind-0.1.0-py3-none-any.whl
+# → dist/wikimind-0.1.0-py3-none-any.whl
 ```
 
-Then install that wheel on any machine:
+Install anywhere from the wheel:
 
 ```bash
-# Option A: global isolated CLI (recommended)
+# Recommended: isolated global CLI
 pipx install dist/wikimind-0.1.0-py3-none-any.whl
 
-# Option B: inside a virtual environment
-python -m venv .venv
-source .venv/bin/activate       # macOS/Linux
-.venv\Scripts\activate          # Windows
+# Alternative: inside a venv
 pip install dist/wikimind-0.1.0-py3-none-any.whl
 ```
 
-After that, you can run `wikimind` directly (no source repo required).
-
-Helper scripts (from repo root):
-
-```bash
-# macOS/Linux/Git Bash
-bash scripts/build-wheel.sh
-
-# PowerShell
-powershell -ExecutionPolicy Bypass -File scripts/build-wheel.ps1
-```
-
-Both scripts build `dist/*.whl` and auto-detect `.venv` Python when available.
-
-**Optional — PDF support:**
-```bash
-pip install -e ".[pdf]"
-```
-
-With the `pdf` extra installed, `wikimind ingest file.pdf` extracts markdown
-from the PDF via `pymupdf4llm` before ingesting. Without it, ingesting a `.pdf`
-raises a clear error with install instructions.
+Helper build scripts are in `scripts/` (`build-wheel.sh` for macOS/Linux/Git Bash,
+`build-wheel.ps1` for PowerShell).
 
 ---
 
 ## Quick start
 
-### With Claude Code (Mode A — recommended)
+### Mode A — MCP (AI assistant)
 
 ```bash
-# 1. Initialize WikiMind in your project directory
 cd my-project
 wikimind init --name "My Research"
-
-# 2. Drop sources into .wiki/raw/
+# Creates: .wiki/, CLAUDE.md, wikimind.toml, .mcp.json
 cp ~/articles/paper.md .wiki/raw/
-
-# 3. Open the project in Claude Code
-# Claude Code reads CLAUDE.md and connects to WikiMind MCP server automatically
-
-# 4. Tell Claude Code to ingest:
-#    "Please ingest .wiki/raw/paper.md into the wiki"
-#    Claude Code uses wiki_write_page, wiki_update_index, wiki_append_log tools
-
-# 5. Browse the wiki in Obsidian
-#    open .wiki/vault/ in Obsidian to see the graph view
 ```
 
-No `ANTHROPIC_API_KEY` needed for this workflow.
+Then connect your AI client (see [MCP setup](#mcp-setup-for-ai-clients) below) and tell it:
+> "Please ingest `.wiki/raw/paper.md` into the wiki"
 
-### With CLI (Mode B)
+The AI reads the schema file and uses WikiMind tools — no `ANTHROPIC_API_KEY` needed
+when using Claude Code (it IS the LLM). Other clients may require their own key.
+
+### Mode B — CLI
 
 ```bash
-# If using default Anthropic provider, set API key
-export ANTHROPIC_API_KEY=sk-ant-...   # macOS/Linux
-set ANTHROPIC_API_KEY=sk-ant-...      # Windows
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
 
-# Initialize
 wikimind init --name "AI Safety Research"
-
-# Add a source and ingest it
 cp ~/papers/alignment.md .wiki/raw/
 wikimind ingest .wiki/raw/alignment.md
-
-# Ask questions
 wikimind query "What are the key arguments about AI alignment?"
 wikimind query --save "Compare the methodologies across papers"
-
-# Health check
 wikimind lint
-```
-
-To use OpenAI instead of Anthropic, set in `wikimind.toml`:
-
-```toml
-[llm]
-provider = "openai"
-model = "gpt-4o-mini"
-api_key_env = "OPENAI_API_KEY"
-```
-
-To use local Ollama:
-
-```toml
-[llm]
-provider = "ollama"
-model = "llama3.1"
-# base_url = "http://localhost:11434"  # optional override
 ```
 
 ---
 
-## Commands reference
+## Commands
 
 ### `wikimind init`
 
-Initialize WikiMind in the current directory.
-
 ```bash
-wikimind init                          # uses directory name as project name
-wikimind init --name "My Research"     # explicit project name
-wikimind init --template general       # general (default) | code | research | book
+wikimind init                          # uses directory name
+wikimind init --name "My Research"
+wikimind init --template research      # general (default) | code | research | book
 ```
 
-Creates:
-- `.wiki/raw/` — drop your source files here
-- `.wiki/vault/` — LLM-maintained wiki (index.md, log.md, overview.md + subdirs)
-- `CLAUDE.md` — LLM instructions (the schema layer)
-- `wikimind.toml` — tool configuration
-- `.mcp.json` — Claude Code MCP config (auto-generated)
+Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`.
 
-If `CLAUDE.md` already exists (e.g. you ran `wikimind init` in an existing
-Claude Code project), WikiMind **appends** the wiki section rather than
-overwriting.
+- `CLAUDE.md` — schema/instructions for Claude Code. For other AI tools, copy or symlink:
+  - GitHub Copilot: `cp CLAUDE.md .github/copilot-instructions.md`
+  - OpenCode / generic: `cp CLAUDE.md AGENTS.md`
+  - Cursor: `cp CLAUDE.md .cursorrules`
+- If `CLAUDE.md` already exists, `wikimind init` appends its wiki section rather than overwriting.
 
 ---
 
 ### `wikimind ingest`
 
-Ingest a source file (or directory) into the wiki.
-
 ```bash
-wikimind ingest .wiki/raw/article.md         # ingest a single file
-wikimind ingest .wiki/raw/                   # ingest all files in raw path
-wikimind ingest .wiki/raw/article.md --dry-run  # preview: show what would be written
-wikimind ingest .wiki/raw/article.md --force    # re-ingest even if file unchanged
+wikimind ingest .wiki/raw/article.md          # ingest a file
+wikimind ingest .wiki/raw/                    # ingest all files in raw/
+wikimind ingest .wiki/raw/article.md --dry-run   # preview without writing
+wikimind ingest .wiki/raw/article.md --force     # re-ingest even if unchanged
 ```
 
-What happens:
-1. Read the source file
-2. Use configured retrieval backend to find relevant existing wiki pages (`bm25` by default)
-3. Single LLM call with structured output → list of files to write
-4. Write wiki pages (source summary, entity pages, concept pages)
-5. Update `.wiki/vault/index.md`, append to `.wiki/vault/log.md`
-6. Record source hash for dedup (skips unchanged files on re-run)
+What happens: read source → find relevant wiki pages (via retrieval backend) → one LLM call → write pages → update `index.md` + `log.md` → record hash (skips unchanged files on re-run).
 
-Large files (>50K chars) are chunked and summarized before ingesting.
-
-Batch ingest (`wikimind ingest .wiki/raw/`) prints a per-run summary and exits non-zero
-if any file fails.
+Large files (>50K chars) are auto-chunked and summarized first.  
+If `retrieval_backend = "qmd"`, runs `qmd embed` automatically after ingest to keep the search index current.
 
 ---
 
 ### `wikimind query`
 
-Ask a question against the wiki.
-
 ```bash
 wikimind query "What are the key themes?"
-wikimind query "How does X relate to Y?" --save
-wikimind query "Compare the methodologies" --save --top-k 15
+wikimind query "How does X relate to Y?" --save       # save answer as wiki page
+wikimind query "Compare methodologies" --save --top-k 15
 ```
 
-Options:
-- `--save` — save the answer as a wiki page in `wiki/analyses/`
-- `--top-k N` — number of wiki pages to consider (default 10)
-
-What happens:
-1. Use configured retrieval backend (`bm25` or `index_keyword`) → find top relevant pages
-2. Single LLM call → answer with [[wikilink]] citations + confidence level
-3. Print answer to terminal
-4. If `--save`: write answer to `wiki/analyses/<slug>.md` + update index + log
-
-**Write-back is the key insight.** `--save` makes your explorations compound in
-the wiki just like ingested sources do. Valuable analyses don't disappear into
-terminal history.
-
-Output shows:
-- Confidence level (high / medium / low — how well the wiki covers this)
-- Citations (wiki pages used)
-- Knowledge gaps (what to ingest next to answer this better)
+Returns answer with `[[wikilink]]` citations, confidence level, and knowledge gaps.
+`--save` writes the answer to `wiki/analyses/` so good syntheses compound in the wiki.
 
 ---
 
 ### `wikimind lint`
 
-Health-check the wiki for structural issues, with optional semantic analysis.
-
 ```bash
-wikimind lint          # report issues (read-only)
-wikimind lint --fix    # report + auto-fix what can be fixed
-wikimind lint --semantic  # one LLM call: contradictions + missing topic pages + source suggestions
+wikimind lint             # structural checks (no LLM)
+wikimind lint --fix       # auto-fix index desync + broken link stubs
+wikimind lint --semantic  # + one LLM call: contradictions, missing pages, source suggestions
 ```
 
-Structural checks (no LLM, instant):
-- **Orphan pages** — wiki pages with zero inbound [[wikilinks]]
-- **Broken links** — [[wikilinks]] pointing to non-existent pages
-- **Index desync** — pages on disk not listed in `.wiki/vault/index.md`
-- **Missing frontmatter** — pages without required YAML fields
-- **Stale sources** — raw files that have changed since their wiki summary was written
-
-Auto-fix (`--fix`) handles:
-- Adds missing pages to `.wiki/vault/index.md`
-- Creates stub pages for broken link targets
-
-Semantic checks (`--semantic`, one LLM call):
-- Contradictions between pages
-- Important topics mentioned but lacking their own page
-- Suggested new sources to fill knowledge gaps
-
-Note: `--semantic` uses your configured CLI provider (API key requirements depend on provider) and findings are currently report-only (no auto-fix).
-
-Run lint regularly as the wiki grows to keep it healthy.
+Structural checks: orphan pages, broken links, index desync, missing frontmatter, stale sources.
 
 ---
 
 ### `wikimind serve`
 
-Start the MCP server for Claude Code integration.
-
 ```bash
-wikimind serve                    # stdio mode (Claude Code uses this via .mcp.json)
-wikimind serve --transport sse    # HTTP/SSE mode (for other MCP clients)
+wikimind serve                    # stdio transport (default, used by Claude Code)
+wikimind serve --transport sse    # HTTP/SSE transport (for Cursor, Copilot, other clients)
 ```
 
-**You don't run this manually** — Claude Code starts it automatically via
-`.mcp.json`. But you can run it to test the connection.
+Starts the MCP server that exposes WikiMind tools to AI assistants. You don't run
+this manually — your AI client starts it automatically via its MCP config.
 
-MCP tools exposed to Claude Code:
+**MCP tools exposed:**
 
 | Tool | Description |
 |------|-------------|
-| `wiki_read_index` | Read the configured wiki index (`index.md`) — always start here |
-| `wiki_read_page` | Read a specific wiki page by path (relative to configured wiki root) |
-| `wiki_search` | Find relevant pages by keyword (returns content) |
-| `wiki_list_pages` | List all wiki page paths |
-| `wiki_write_page` | Create or update a wiki page (relative to configured wiki root) |
-| `wiki_update_index` | Add/remove entries from the configured `index.md` |
-| `wiki_append_log` | Append an entry to the configured `log.md` |
-| `wiki_status` | Get wiki stats (page count, source count, last updated) |
+| `wiki_read_index` | Read `index.md` — start here |
+| `wiki_read_page` | Read a page by path |
+| `wiki_search` | Find relevant pages by query (uses configured retrieval backend) |
+| `wiki_list_pages` | List all page paths |
+| `wiki_write_page` | Create or update a page |
+| `wiki_update_index` | Add/remove index entries |
+| `wiki_append_log` | Append to `log.md` |
+| `wiki_status` | Wiki stats |
 
-MCP read/write paths are sandboxed to the configured wiki directory. Attempts to use
-`../` or absolute paths are rejected.
-
----
-
-### `wikimind status`
-
-Show wiki statistics.
-
-```bash
-wikimind status
-```
-
-Output: page count, source count, unprocessed sources, last updated, paths, model.
+Read/write paths are sandboxed to the configured wiki directory — `../` and absolute paths are rejected.
 
 ---
 
-### `wikimind cost`
-
-Show cumulative LLM token usage across all past CLI runs.
+### `wikimind status` / `wikimind cost` / `wikimind watch`
 
 ```bash
-wikimind cost           # show all-time totals + last 10 commands
-wikimind cost --last 20 # show last 20 commands
+wikimind status           # page count, source count, last updated, paths
+wikimind cost             # cumulative LLM token usage (last 10 runs)
+wikimind cost --last 20
+wikimind watch            # auto-ingest new/changed files in raw/ every 5s
+wikimind watch --interval 30
 ```
-
-Usage is persisted to `.wikimind/cost.json` after every `ingest`, `query`,
-`lint --semantic`, and `watch` run. The `cost` command reads that file and
-displays a summary table. If `max_budget_usd` is set, it also shows how much
-of the budget has been consumed.
-
-Note: USD estimate is modeled for Anthropic pricing only; other providers show $0.00.
 
 ---
 
-### `wikimind watch`
+## MCP setup for AI clients
 
-Watch `raw/` for new or changed files and auto-ingest them.
+WikiMind's MCP server works with any MCP-compatible AI assistant. Two transport modes:
+- **stdio** (default) — client spawns the server as a subprocess. Used by Claude Code, Cursor, OpenCode.
+- **SSE** — client connects to a running HTTP server. Used by some web-based clients.
 
-```bash
-wikimind watch                  # poll every 5 seconds (default)
-wikimind watch --interval 30    # poll every 30 seconds
-wikimind watch --force          # re-ingest even if file is unchanged
+`wikimind init` auto-generates `.mcp.json` for Claude Code. For other tools, configure manually using the examples below. Replace `wikimind` with the full venv path if not installed globally.
+
+---
+
+### Claude Code
+
+Reads `.mcp.json` from the project root automatically — nothing extra needed after `wikimind init`.
+
+**`.mcp.json`** (auto-generated, edit if needed):
+```json
+{
+  "mcpServers": {
+    "wikimind": {
+      "command": "wikimind",
+      "args": ["serve"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
 ```
 
-Uses stdlib polling — no extra dependencies. Detects:
-- **New files** (never ingested before)
-- **Changed files** (content differs from last ingest — same as stale-source lint)
+Also copy the schema file so Claude reads the wiki instructions:
+```bash
+# Already created by wikimind init — no action needed
+# CLAUDE.md is read automatically by Claude Code
+```
 
-Stop with Ctrl+C. Token cost is persisted to `.wikimind/cost.json` after each
-auto-ingest batch.
+---
+
+### GitHub Copilot (VS Code)
+
+**Step 1** — Add MCP server to VS Code settings:
+
+`.vscode/mcp.json` (workspace) or user `settings.json`:
+```json
+{
+  "servers": {
+    "wikimind": {
+      "type": "stdio",
+      "command": "wikimind",
+      "args": ["serve"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
+```
+
+**Step 2** — Copy the schema file to the Copilot instructions location:
+```bash
+mkdir -p .github
+cp CLAUDE.md .github/copilot-instructions.md
+```
+
+Copilot reads `.github/copilot-instructions.md` automatically for repo-level instructions.
+
+---
+
+### Cursor
+
+**Step 1** — Add MCP server to `.cursor/mcp.json` (project) or global Cursor MCP settings:
+```json
+{
+  "mcpServers": {
+    "wikimind": {
+      "command": "wikimind",
+      "args": ["serve"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
+```
+
+**Step 2** — Copy the schema file:
+```bash
+cp CLAUDE.md .cursorrules
+```
+
+---
+
+### OpenCode
+
+**Step 1** — Add MCP server to `opencode.json` in the project root:
+```json
+{
+  "mcp": {
+    "wikimind": {
+      "type": "local",
+      "command": ["wikimind", "serve"],
+      "cwd": "/path/to/your/project"
+    }
+  }
+}
+```
+
+**Step 2** — Copy the schema file:
+```bash
+cp CLAUDE.md AGENTS.md
+```
+
+OpenCode reads `AGENTS.md` automatically.
+
+---
+
+### Other MCP clients (HTTP/SSE)
+
+For clients that connect to a running HTTP server rather than spawning a subprocess:
+
+```bash
+# Start the server once, keep it running
+wikimind serve --transport sse
+# Listening at http://localhost:8000/sse
+```
+
+Point your client at `http://localhost:8000/sse`.
+
+---
+
+> **Schema file tip:** The generated `CLAUDE.md` contains the wiki structure, page
+> format, and workflow instructions. Whichever file your AI tool reads (see table above),
+> make sure it has this content — that's what makes the AI maintain the wiki correctly.
 
 ---
 
@@ -427,20 +361,22 @@ name = "My Research"
 template = "general"
 
 [paths]
-raw = ".wiki/raw/"      # where you drop source files
-wiki = ".wiki/vault/"   # where the LLM writes wiki pages
+raw = ".wiki/raw/"
+wiki = ".wiki/vault/"
 
 [llm]
-provider = "anthropic"                # anthropic | openai | ollama
-model = "claude-sonnet-4-20250514"    # example; change per provider
-api_key_env = "ANTHROPIC_API_KEY"     # OPENAI_API_KEY for openai; optional for ollama
-# base_url = ""                        # optional override (OpenAI: https://api.openai.com/v1, Ollama: http://localhost:11434)
+provider = "anthropic"              # anthropic | openai | ollama
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"   # OPENAI_API_KEY for openai; optional for ollama
+# base_url = ""                      # optional: custom API base URL
 # max_tokens_per_call = 8192
-# max_budget_usd = 5.0                 # per-session spending cap (0 = no limit)
+# max_budget_usd = 5.0               # per-session spending cap (0 = no limit)
 
 [wiki]
 required_frontmatter = ["title", "type", "tags", "created", "updated"]
-retrieval_backend = "bm25"            # bm25 | index_keyword
+retrieval_backend = "bm25"          # bm25 | index_keyword | qmd
+# qmd_mode = "vsearch"               # search | vsearch | query (default: vsearch)
+# qmd_bin = "qmd"                    # path to qmd binary if not on PATH
 
 [wiki.categories]
 entities = "People, organizations, tools, systems"
@@ -449,74 +385,66 @@ sources = "One summary per raw source"
 analyses = "Saved queries, comparisons, syntheses"
 ```
 
-Provider notes:
-- `anthropic`: requires `ANTHROPIC_API_KEY`.
-- `openai`: requires `OPENAI_API_KEY` (set `api_key_env = "OPENAI_API_KEY"`).
-- `ollama`: local provider, API key not required by default.
+**Retrieval backends:**
 
-Retriever notes:
-- `bm25`: full-text lexical BM25 ranking over wiki pages (default, better at larger scale).
-- `index_keyword`: lightweight index.md keyword match (fast, simple for very small wikis).
+| Backend | Algorithm | Best for | Dependencies |
+|---------|-----------|----------|--------------|
+| `index_keyword` | Keyword overlap on `index.md` | < 50 pages, fastest | None |
+| `bm25` | Okapi BM25 over all pages | 50–200 pages (default) | None |
+| `qmd` | Hybrid: BM25 + vector + local LLM re-ranking | 200+ pages | Node.js + qmd CLI |
 
-### `CLAUDE.md` (the schema layer)
+**qmd search modes** (set via `qmd_mode`):
 
-The most important file. Generated by `wikimind init`. Tells the LLM:
-- Where the wiki lives and how it's structured
-- Required page format (YAML frontmatter, [[wikilinks]])
-- What to do when ingesting, querying, or maintaining the wiki
-- Which CLI commands are available
+| Mode | What it does |
+|------|-------------|
+| `vsearch` | Vector/semantic search — finds conceptually related pages even with different words (default) |
+| `query` | Full hybrid: BM25 + vector + local LLM re-ranking — best quality, slowest |
+| `search` | BM25 lexical only — same algorithm as our built-in BM25 backend, no benefit over it |
 
-You and the LLM co-evolve this file over time. Add domain-specific conventions
-as you discover what works for your use case.
+All qmd modes run **fully locally** — no extra API key required. qmd downloads a
+local GGUF model on first run for embeddings and re-ranking.
 
-`wikimind init` will create `CLAUDE.md` if it doesn't exist. If it already
-exists, WikiMind appends its section instead of overwriting your existing
-project instructions.
+**qmd one-time setup:**
 
-### `.mcp.json`
+```bash
+# 1. Install qmd globally (requires Node.js)
+npm install -g @tobilu/qmd
+# or: bun install -g @tobilu/qmd
 
-Auto-generated by `wikimind init`. Points Claude Code to the `wikimind serve`
-command. Do not edit manually unless you need a custom path.
+# 2. Register the wiki vault as a qmd collection (once per project)
+cd your-project
+qmd collection add .wiki/vault/ --name wiki
 
-If WikiMind is installed globally (for example via `pipx`), you can use
-`"command": "wikimind"` instead of an absolute `.venv` path.
-
-```json
-{
-  "mcpServers": {
-    "wikimind": {
-      "command": "/path/to/.venv/Scripts/wikimind",
-      "args": ["serve"],
-      "cwd": "/path/to/your/project"
-    }
-  }
-}
+# 3. Pre-compute embeddings
+qmd embed
 ```
 
-Client setup notes:
-- Claude Code: usually no manual MCP setup needed after `wikimind init` because
-  `.mcp.json` is auto-generated.
-- Existing projects: if `.mcp.json` already exists, `wikimind init` leaves it
-  unchanged (you can merge manually if needed).
-- Other MCP clients (for example GitHub Copilot MCP workflows): configure the
-  equivalent MCP server entry manually in that client's own settings, typically
-  with `command: wikimind`, `args: ["serve"]`, and `cwd` set to your project.
+**After setup**, set in `wikimind.toml`:
 
-GitHub Copilot MCP example (client-managed config):
-
-```json
-{
-  "mcpServers": {
-    "wikimind": {
-      "command": "wikimind",
-      "args": ["serve"],
-      "cwd": "/path/to/your/project"
-    }
-  }
-}
+```toml
+[wiki]
+retrieval_backend = "qmd"
+# qmd_mode = "vsearch"   # default — change to "query" for best quality
 ```
 
-Note: exact file location/format can vary by client version and host app.
+`wikimind ingest` automatically reruns `qmd embed` after each ingest batch so the
+index stays current. You only need to run `qmd embed` manually after bulk changes.
+
+**Fallback:** If `retrieval_backend = "qmd"` but qmd is not installed, WikiMind
+automatically falls back to BM25 with a warning — no crash, no broken workflow.
+
+**Provider notes:**
+- `anthropic` — requires `ANTHROPIC_API_KEY`
+- `openai` — requires `OPENAI_API_KEY` (`api_key_env = "OPENAI_API_KEY"`)
+- `ollama` — local, no API key required
+
+Switch provider example:
+
+```toml
+[llm]
+provider = "ollama"
+model = "llama3.1"
+```
 
 ---
 
@@ -524,20 +452,16 @@ Note: exact file location/format can vary by client version and host app.
 
 ```
 .wiki/vault/
-├── index.md          # Master catalog — LLM reads this first on every operation
-├── log.md            # Append-only chronological record of all wiki changes
-├── overview.md       # High-level synthesis of the topic (LLM maintains)
-├── entities/         # People, organizations, tools, systems
-│   └── openai.md
-├── concepts/         # Ideas, theories, patterns, principles
-│   └── transformer-architecture.md
-├── sources/          # One summary page per raw source
-│   └── attention-is-all-you-need.md
-└── analyses/         # Saved query answers, comparisons, syntheses
-    └── compare-methodologies.md
+├── index.md          # master catalog — LLM reads this first
+├── log.md            # append-only change history
+├── overview.md       # high-level synthesis
+├── entities/         # people, organizations, tools, systems
+├── concepts/         # ideas, theories, patterns, principles
+├── sources/          # one summary per raw source
+└── analyses/         # saved query answers, comparisons, syntheses
 ```
 
-Every wiki page has YAML frontmatter:
+Every page has YAML frontmatter:
 
 ```yaml
 ---
@@ -550,56 +474,18 @@ sources: [sources/source-name]
 ---
 ```
 
-Pages cross-reference each other with `[[wikilinks]]`. The link graph is what
-makes the wiki valuable — it's pre-built, not re-derived on every query.
+Pages cross-reference each other with `[[wikilinks]]`. The pre-built link graph is
+what makes the wiki valuable — not re-derived on every query.
 
 ---
 
-## Workflow tips
+## Tips
 
-**Use Obsidian to browse the wiki.**
-Open `.wiki/vault/` as an Obsidian vault. The graph view shows which pages are hubs
-and which are orphans. [[wikilinks]] are clickable. The wiki becomes genuinely
-navigable.
-
-**Save good answers.**
-`wikimind query --save "..."` files the answer back as a wiki page. Syntheses
-and comparisons you discover are valuable — don't let them disappear into
-terminal history.
-
-**Ingest one source at a time** (especially early on).
-Stay involved: read the summaries, check the updates, guide the LLM on what
-to emphasize. You can batch-ingest with `wikimind ingest .wiki/raw/` but you get
-better results when you're in the loop.
-
-**Run lint periodically.**
-As the wiki grows, orphan pages and broken links accumulate. `wikimind lint`
-catches these before they become a problem. `wikimind lint --fix` handles the
-mechanical fixes.
-
-**git init the wiki.**
-The wiki is just markdown files. Version history is free. If the LLM writes
-something bad, `git diff` shows what changed and `git checkout` reverts it.
-
-**Use `--dry-run` before trusting a new source.**
-`wikimind ingest .wiki/raw/file.md --dry-run` shows what the LLM would write without
-actually writing it. Useful for checking a new source type or after changing
-`CLAUDE.md`.
-
----
-
-## Use cases
-
-- **Research** — going deep on a topic over weeks: reading papers, articles,
-  reports, and incrementally building a comprehensive wiki with an evolving thesis.
-- **Reading a book** — file each chapter as you go, building out pages for
-  characters, themes, plot threads, and how they connect.
-- **Personal knowledge** — tracking goals, health, self-improvement by filing
-  journal entries, articles, podcast notes.
-- **Team/business** — internal wiki maintained by LLMs, fed by Slack threads,
-  meeting transcripts, project documents.
-- **Code projects** — used alongside Claude Code: as Claude analyzes code,
-  it writes architectural notes, decision records, and entity pages to the wiki.
+- **Browse in Obsidian** — open `.wiki/vault/` as an Obsidian vault. Graph view, clickable wikilinks, visible orphans.
+- **Save good answers** — `wikimind query --save "..."` files the answer back as a wiki page. Don't let syntheses disappear into terminal history.
+- **git init the wiki** — the wiki is just markdown. `git diff` shows what changed, `git checkout` reverts it.
+- **`--dry-run` before trusting a new source** — preview what the LLM would write without committing.
+- **Run lint periodically** — `wikimind lint --fix` handles mechanical fixes as the wiki grows.
 
 ---
 
@@ -607,19 +493,15 @@ actually writing it. Useful for checking a new source type or after changing
 
 | Feature | Status |
 |---------|--------|
-| `wikimind ingest` | Done |
-| `wikimind query` | Done |
-| `wikimind lint` (structural + stale sources) | Done |
-| `wikimind lint --semantic` (contradictions, gaps) | Done (report-only) |
-| `wikimind serve` (MCP server) | Done |
-| `wikimind watch` (auto-ingest new/stale files) | Done |
-| `wikimind cost` (persistent token history) | Done |
-| `wikimind init` — templates: general, code, research, book | Done |
-| Dedup (skip unchanged sources) | Done |
-| Large file chunking (>50K chars) | Done |
-| PDF support (`pip install -e ".[pdf]"`) | Done |
-| Retrieval abstraction (`bm25` + `index_keyword` backends) | Done |
+| `ingest`, `query`, `lint`, `serve`, `watch`, `cost`, `status` | Done |
+| `init` — templates: general, code, research, book | Done |
+| MCP server — works with Claude Code, GitHub Copilot, Cursor, OpenCode | Done |
+| Retrieval backends: `bm25`, `index_keyword` | Done |
+| `qmd` hybrid/semantic search backend (vector + LLM re-ranking, fully local) | Done |
 | MCP `wiki_search` uses configured retrieval backend | Done |
-| Provider adapter architecture (Anthropic/OpenAI/Ollama) | Done |
-| Budget guard (`max_budget_usd` in config) | Done |
+| Dedup (skip unchanged sources), large file chunking, PDF support | Done |
+| Provider adapters: Anthropic / OpenAI / Ollama | Done |
+| Budget guard (`max_budget_usd`) | Done |
 | PyPI publish | Planned |
+
+See [GAPS.md](GAPS.md) for the full gap analysis and planned improvements.

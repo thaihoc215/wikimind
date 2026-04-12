@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 import tomllib
 from datetime import datetime
@@ -262,7 +264,7 @@ def ingest(
     from wikimind.retrieval import RetrievalError, make_retriever
 
     try:
-        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend)
+        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
         raise typer.Exit(1)
@@ -325,6 +327,23 @@ def ingest(
     )
     _print_cost(llm, command="ingest", cfg=cfg)
 
+    if cfg.wiki.retrieval_backend == "qmd" and not dry_run:
+        qmd_bin = cfg.wiki.qmd_bin or "qmd"
+        if shutil.which(qmd_bin):
+            console.print("[dim]Refreshing qmd embeddings...[/dim]")
+            try:
+                subprocess.run(
+                    [qmd_bin, "embed"],
+                    cwd=str(cfg.root),
+                    timeout=120,
+                    check=False,
+                )
+                console.print("[green]qmd embeddings refreshed.[/green]")
+            except subprocess.TimeoutExpired:
+                console.print("[yellow]Warning: qmd embed timed out after 120s.[/yellow]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: qmd embed failed: {e}[/yellow]")
+
     if failed > 0:
         raise typer.Exit(1)
 
@@ -348,7 +367,7 @@ def query(
     from wikimind.retrieval import RetrievalError, make_retriever
 
     try:
-        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend)
+        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
         raise typer.Exit(1)
@@ -617,7 +636,7 @@ def watch(
     store = WikiStore(cfg.wiki_path, cfg.raw_path)
 
     try:
-        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend)
+        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
         raise typer.Exit(1)

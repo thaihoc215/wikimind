@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(python -m venv .venv)",
       "Bash(.venv/Scripts/pip install:*)",

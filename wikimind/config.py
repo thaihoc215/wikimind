@@ -45,7 +45,9 @@ class WikiConfig:
     required_frontmatter: list[str] = field(
         default_factory=lambda: ["title", "type", "tags", "created", "updated"]
     )
-    retrieval_backend: str = "bm25"
+    retrieval_backend: str = "qmd"
+    qmd_mode: str = "vsearch"
+    qmd_bin: str = "qmd"
     categories: dict[str, str] = field(
         default_factory=lambda: {
             "entities": "People, organizations, tools, systems",
@@ -123,6 +125,8 @@ def load_config(root: Path | None = None) -> Config:
             "required_frontmatter", ["title", "type", "tags", "created", "updated"]
         ),
         retrieval_backend=wiki_data.get("retrieval_backend", "bm25"),
+        qmd_mode=wiki_data.get("qmd_mode", "vsearch"),
+        qmd_bin=wiki_data.get("qmd_bin", "qmd"),
         categories=wiki_data.get(
             "categories",
             {

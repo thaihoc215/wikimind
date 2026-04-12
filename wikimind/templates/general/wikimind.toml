@@ -16,7 +16,11 @@ api_key_env = "ANTHROPIC_API_KEY"  # use OPENAI_API_KEY for openai; optional for
 
 [wiki]
 required_frontmatter = ["title", "type", "tags", "created", "updated"]
-retrieval_backend = "bm25"  # bm25 | index_keyword
+retrieval_backend = "qmd"   # qmd (default) | bm25 | index_keyword
+# ↑ Uses qmd vsearch (vector/semantic search). Falls back to bm25 automatically if qmd is not installed.
+#   One-time setup: npm install -g @tobilu/qmd  →  qmd collection add .wiki/vault/ --name <project>  →  qmd embed
+qmd_mode = "vsearch"        # vsearch (vector) | query (hybrid, best quality) | search (BM25 only)
+# qmd_bin = "qmd"           # full path to qmd binary if not on PATH
 
 [wiki.categories]
 entities = "People, organizations, tools, systems"

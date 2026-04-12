@@ -17,6 +17,10 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
+import shutil
+import subprocess
+import threading
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -26,6 +30,17 @@ from wikimind.retrieval import make_retriever
 from wikimind.wiki import WikiStore
 
 
+def _setup_logger(log_path: Path) -> logging.Logger:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("wikimind.server")
+    if not logger.handlers:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+    return logger
+
+
 def create_server(root: Path | None = None) -> FastMCP:
     """Create the MCP server bound to the wiki at `root` (defaults to cwd)."""
     try:
@@ -33,8 +48,74 @@ def create_server(root: Path | None = None) -> FastMCP:
     except ConfigError as e:
         raise RuntimeError(f"WikiMind config error: {e}") from e
 
+    log_path = cfg.wiki_path.parent / ".wikimind" / "server.log"
+    logger = _setup_logger(log_path)
+
     store = WikiStore(cfg.wiki_path, cfg.raw_path)
-    retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend)
+    retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
+    logger.info("server started | backend=%s qmd_mode=%s wiki=%s", cfg.wiki.retrieval_backend, cfg.wiki.qmd_mode, cfg.wiki_path)
+
+    # ── qmd background embed state ────────────────────────────────────────
+    # _embed_dirty: True when pages have been written since the last embed.
+    # _embed_thread: the currently running background embed thread, or None.
+    # _embed_lock:   guards both of the above.
+    #
+    # Flow:
+    #   wiki_write_page → set dirty, _trigger_embed() → returns immediately
+    #   background thread → clears dirty before subprocess (so mid-embed writes
+    #                        set it again), runs qmd embed, then exits
+    #   wiki_search → _wait_for_embed() short-circuits if no thread running,
+    #                 otherwise waits; then searches with a current index
+    _embed_dirty = [False]
+    _embed_thread: list[threading.Thread | None] = [None]
+    _embed_lock = threading.Lock()
+
+    def _run_embed() -> None:
+        """Background worker: runs qmd embed then clears state."""
+        with _embed_lock:
+            _embed_dirty[0] = False  # clear BEFORE subprocess so mid-embed writes re-set it
+        qmd_bin = cfg.wiki.qmd_bin or "qmd"
+        if shutil.which(qmd_bin):
+            logger.info("embed | start")
+            try:
+                result = subprocess.run(
+                    [qmd_bin, "embed"],
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    cwd=str(cfg.root),
+                    timeout=120,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    logger.warning("embed | exit_code=%d stderr=%r", result.returncode, result.stderr[:200])
+                else:
+                    logger.info("embed | done")
+            except subprocess.TimeoutExpired:
+                logger.warning("embed | timed out after 120s")
+            except Exception as exc:
+                logger.warning("embed | error: %s", exc)
+        with _embed_lock:
+            _embed_thread[0] = None
+
+    def _trigger_embed() -> None:
+        """Fire-and-forget: start a background embed if dirty and none is running."""
+        with _embed_lock:
+            if not _embed_dirty[0]:
+                return
+            if _embed_thread[0] is not None and _embed_thread[0].is_alive():
+                return  # already in progress; it will embed all pages written so far
+            t = threading.Thread(target=_run_embed, daemon=True)
+            _embed_thread[0] = t
+            t.start()
+
+    def _wait_for_embed() -> None:
+        """Block until any in-progress background embed finishes (no-op if idle)."""
+        with _embed_lock:
+            t = _embed_thread[0]
+        if t is not None:
+            t.join(timeout=125)
+
     mcp = FastMCP(
         "wikimind",
         instructions=(
@@ -59,10 +140,22 @@ def create_server(root: Path | None = None) -> FastMCP:
         Use wiki_read_index first to discover available page paths.
         """
         try:
-            return store.read_page(path)
+            content = store.read_page(path)
+            logger.info("wiki_read_page | path=%r bytes=%d", path, len(content))
+            return content
         except FileNotFoundError:
+            # Retry with .md extension — LLM may pass wikilink paths without extension
+            if not path.endswith(".md"):
+                try:
+                    content = store.read_page(path + ".md")
+                    logger.info("wiki_read_page | path=%r bytes=%d (auto .md)", path, len(content))
+                    return content
+                except (FileNotFoundError, ValueError):
+                    pass
+            logger.warning("wiki_read_page | not_found path=%r", path)
             return f"Page not found: {path}"
         except ValueError as e:
+            logger.warning("wiki_read_page | invalid_path path=%r error=%s", path, e)
             return f"Invalid path: {e}"
 
     @mcp.tool()
@@ -75,7 +168,10 @@ def create_server(root: Path | None = None) -> FastMCP:
             query: The search query or question
             top_k: Maximum number of pages to return (default 10)
         """
+        _wait_for_embed()
+        logger.info("wiki_search | algo=%s query=%r top_k=%d", retriever.name, query, top_k)
         pages = retriever.retrieve(query, top_k=top_k)
+        logger.info("wiki_search | found=%d pages=%s", len(pages), list(pages.keys()))
         if not pages:
             return json.dumps({"found": 0, "pages": {}})
         return json.dumps({"found": len(pages), "pages": pages}, ensure_ascii=False)
@@ -131,8 +227,13 @@ def create_server(root: Path | None = None) -> FastMCP:
         try:
             action = "updated" if store.page_exists(path) else "created"
             store.write_page(path, content)
+            logger.info("wiki_write_page | %s path=%r bytes=%d", action, path, len(content))
+            with _embed_lock:
+                _embed_dirty[0] = True
+            _trigger_embed()  # fire-and-forget; does not block
             return f"OK: {action} wiki/{path}"
         except ValueError as e:
+            logger.warning("wiki_write_page | invalid_path path=%r error=%s", path, e)
             return f"Invalid path: {e}"
 
     @mcp.tool()
@@ -148,6 +249,7 @@ def create_server(root: Path | None = None) -> FastMCP:
             entries_to_remove: Lines to remove from index.md (exact match)
         """
         store.update_index(entries_to_add, entries_to_remove)
+        logger.info("wiki_update_index | added=%d removed=%d", len(entries_to_add), len(entries_to_remove))
         return f"OK: added {len(entries_to_add)}, removed {len(entries_to_remove)} index entries"
 
     @mcp.tool()
@@ -163,6 +265,7 @@ def create_server(root: Path | None = None) -> FastMCP:
             entry: The log entry to append
         """
         store.append_log(entry)
+        logger.info("wiki_append_log | entry=%r", entry[:80])
         return "OK: log entry appended"
 
     return mcp
