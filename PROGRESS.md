@@ -72,6 +72,10 @@ Goal: `wikimind init && wikimind ingest .wiki/raw/article.md` works end-to-end.
 | Persistent cost tracking | ✅ Done | `.wikimind/cost.json` logs every command; `wikimind cost` shows history + totals |
 | PDF support | ✅ Done | `_read_source()` routes `.pdf` via `pymupdf4llm`; friendly error if dep missing |
 | File watcher | ✅ Done | `wikimind watch [--interval N]` — polls raw/ and auto-ingests new/stale files |
+| qmd hybrid/semantic search backend | ✅ Done | `QmdRetriever` with 3 modes (search/vsearch/query), Windows .CMD wrapper handling, graceful fallback to BM25 |
+| Background qmd embed in MCP server | ✅ Done | Threading pattern: `wiki_write_page` sets dirty flag → background `qmd embed` thread; `wiki_search` waits for completion |
+| Auto `qmd embed` after CLI ingest | ✅ Done | Post-ingest subprocess call when `retrieval_backend = "qmd"` |
+| CLAUDE.md merge-safe update | ✅ Done | `<!-- wikimind:start/end -->` markers; append/replace/skip logic with `--force` flag |
 | PyPI publish | ⬜ Pending | |
 
 ---
@@ -110,3 +114,17 @@ Goal: `wikimind init && wikimind ingest .wiki/raw/article.md` works end-to-end.
 - Added persistent cost tracking: `.wikimind/cost.json` accumulates across sessions; `wikimind cost` shows full history
 - Added budget guard: `max_budget_usd` in `[llm]` config blocks LLM calls once session spend exceeds limit
 - Added `wikimind watch` command: stdlib polling loop, auto-ingests new and stale files from raw/
+- Implemented `QmdRetriever` in `retrieval.py`: subprocess to qmd CLI with 3 search modes (search/vsearch/query)
+- Added Windows .CMD wrapper detection in `QmdRetriever._build_cmd_prefix()` — routes through Git's `sh.exe`
+- Wired `make_retriever()` factory to support `retrieval_backend = "qmd"` with auto-fallback to BM25
+- Implemented background qmd embed threading in MCP server (`_embed_dirty`, `_embed_thread`, `_embed_lock`)
+- Added auto `qmd embed` post-ingest subprocess call when retrieval backend is qmd
+- Implemented CLAUDE.md merge-safe update with `<!-- wikimind:start/end -->` markers
+- Added qmd retriever test coverage: factory, fallback, mode validation, subprocess mocking, top_k enforcement
+
+### 2026-04-13
+- Documentation review and update pass:
+  - Updated GAPS.md: marked GAP-10 (qmd hybrid/semantic search) as Done with implementation summary
+  - Rewrote ARCHITECTURE.md: added QmdRetriever, background embed threading, lint data flow, typed validation layer, cost tracking, dedup, provider adapter pattern, filesystem layout
+  - Updated README.md: fixed Windows venv activation, fixed analyses path, added Development section (tests, project structure), added Documentation index, expanded roadmap with planned items
+  - Updated PROGRESS.md: added qmd retriever, background embed, CLAUDE.md merge, and auto-embed entries to Phase 3 table and session log

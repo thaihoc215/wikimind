@@ -444,7 +444,24 @@ already lives next to.
 
 **Priority:** Medium  
 **Complexity:** Low–Medium  
-**Status:** Not started
+**Status:** Done
+
+### Implementation Summary
+
+Fully implemented as `QmdRetriever` in `wikimind/retrieval.py` with the following:
+
+- **Three search modes** via `qmd_mode` config: `search` (BM25), `vsearch` (vector/semantic, default), `query` (full hybrid + LLM re-ranking)
+- **Subprocess integration**: calls qmd CLI via `subprocess.run()` with `--json` output parsing
+- **Windows compatibility**: detects npm `.CMD` wrappers and routes through Git's `sh.exe`
+- **Graceful fallback**: `make_retriever()` auto-falls back to BM25 if qmd is not installed
+- **Background embed in MCP server**: `server.py` uses a threading pattern (`_embed_dirty` / `_embed_thread` / `_embed_lock`) — `wiki_write_page` sets a dirty flag and fires a background `qmd embed` thread; `wiki_search` waits for any in-progress embed before searching
+- **Auto-embed after CLI ingest**: `wikimind ingest` runs `qmd embed` automatically when `retrieval_backend = "qmd"`
+- **Config**: `retrieval_backend = "qmd"`, `qmd_mode`, `qmd_bin` in `wikimind.toml`
+- **Tests**: `test_retrieval.py` covers factory, fallback, mode validation, subprocess mocking, top_k enforcement
+
+The sections below are preserved as design reference for the original analysis.
+
+---
 
 ### What the original idea says
 
@@ -765,4 +782,4 @@ this complexity before the problem is real.
 | GAP-7 | `wikimind log` command | Low | Low | Not started |
 | GAP-8 | Obsidian init config + frontmatter guidance | Low | Low | Not started |
 | GAP-9 | Deleted source detection in lint | Low | Low | Not started |
-| GAP-10 | qmd hybrid/semantic search integration | Medium | Low–Medium | Not started |
+| GAP-10 | qmd hybrid/semantic search integration | Medium | Low–Medium | **Done** |

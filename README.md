@@ -51,7 +51,8 @@ py -m venv .venv # Windows
 
 # Activate
 source .venv/bin/activate        # macOS / Linux / Git Bash
-source .venv/Scripts/activate           # Windows PowerShell / cmd
+.venv\Scripts\activate           # Windows PowerShell
+.venv\Scripts\activate.bat       # Windows cmd
 
 pip install -e .
 pip install -e ".[pdf]"          # optional: adds PDF ingestion support
@@ -167,7 +168,7 @@ wikimind query "Compare methodologies" --save --top-k 15
 ```
 
 Returns answer with `[[wikilink]]` citations, confidence level, and knowledge gaps.
-`--save` writes the answer to `wiki/analyses/` so good syntheses compound in the wiki.
+`--save` writes the answer to `.wiki/vault/analyses/` so good syntheses compound in the wiki.
 
 ---
 
@@ -489,6 +490,51 @@ what makes the wiki valuable — not re-derived on every query.
 
 ---
 
+## Development
+
+### Running tests
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+82 tests across 9 test files. All tests use mocked LLM clients — no real API calls, no keys needed.
+
+### Project structure
+
+```
+wikimind/              # Main package (~3,200 lines)
+├── cli.py             # Typer CLI entry point (8 commands)
+├── config.py          # TOML config loader + typed dataclasses
+├── wiki.py            # WikiStore — filesystem operations
+├── llm.py             # LLMClient + 3 provider adapters
+├── llm_schema.py      # Typed validation for LLM tool outputs
+├── retrieval.py       # Retriever protocol + 3 backends
+├── server.py          # FastMCP server (8 tools)
+├── operations/        # Business logic (ingest, query, lint)
+├── prompts/           # LLM system prompts + tool schemas
+└── templates/         # Init templates (general, code, research, book)
+
+tests/                 # Test suite (~1,400 lines, 82 tests)
+scripts/               # Build scripts (bash + PowerShell)
+```
+
+---
+
+## Documentation
+
+| File | Description |
+|------|-------------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Component overview, data flow diagrams (Mermaid), MCP threading model |
+| [GAPS.md](GAPS.md) | Gap analysis vs. original Karpathy idea — 9 open items, 1 done |
+| [PROGRESS.md](PROGRESS.md) | Phase-by-phase implementation tracker with session log |
+| [CHEATSHEET.md](CHEATSHEET.md) | Quick-reference operator guide for daily use |
+| [docs/search-comparison.md](docs/search-comparison.md) | Retrieval backend comparison (BM25 vs. qmd vs. embeddings) |
+| [docs/qmd-setup.md](docs/qmd-setup.md) | Full qmd integration guide with troubleshooting |
+
+---
+
 ## Roadmap
 
 | Feature | Status |
@@ -496,12 +542,17 @@ what makes the wiki valuable — not re-derived on every query.
 | `ingest`, `query`, `lint`, `serve`, `watch`, `cost`, `status` | Done |
 | `init` — templates: general, code, research, book | Done |
 | MCP server — works with Claude Code, GitHub Copilot, Cursor, OpenCode | Done |
-| Retrieval backends: `bm25`, `index_keyword` | Done |
+| Retrieval backends: `bm25`, `index_keyword`, `qmd` | Done |
 | `qmd` hybrid/semantic search backend (vector + LLM re-ranking, fully local) | Done |
 | MCP `wiki_search` uses configured retrieval backend | Done |
 | Dedup (skip unchanged sources), large file chunking, PDF support | Done |
 | Provider adapters: Anthropic / OpenAI / Ollama | Done |
 | Budget guard (`max_budget_usd`) | Done |
+| Typed output validation (LLM responses validated before filesystem writes) | Done |
+| Background qmd embed in MCP server (non-blocking write + search sync) | Done |
 | PyPI publish | Planned |
+| Interactive ingest (`--focus` flag) | Planned |
+| `wikimind synthesize` (regenerate overview.md) | Planned |
+| Atomic MCP ingest tool (`wiki_ingest_source`) | Planned |
 
 See [GAPS.md](GAPS.md) for the full gap analysis and planned improvements.
