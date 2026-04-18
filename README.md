@@ -95,11 +95,18 @@ Helper build scripts are in `scripts/` (`build-wheel.sh` for macOS/Linux/Git Bas
 
 ### Mode A — MCP (AI assistant)
 
+macOS / Linux:
 ```bash
 cd my-project
 wikimind init --name "My Research"
-# Creates: .wiki/, CLAUDE.md, wikimind.toml, .mcp.json
 cp ~/articles/paper.md .wiki/raw/
+```
+
+Windows (PowerShell):
+```powershell
+cd my-project
+wikimind init --name "My Research"
+Copy-Item "$HOME\articles\paper.md" .wiki\raw\
 ```
 
 Then connect your AI client (see [MCP setup](#mcp-setup-for-ai-clients) below) and tell it:
@@ -110,12 +117,25 @@ when using Claude Code (it IS the LLM). Other clients may require their own key.
 
 ### Mode B — CLI
 
+macOS / Linux:
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
 
 wikimind init --name "AI Safety Research"
 cp ~/papers/alignment.md .wiki/raw/
 wikimind ingest .wiki/raw/alignment.md
+wikimind query "What are the key arguments about AI alignment?"
+wikimind query --save "Compare the methodologies across papers"
+wikimind lint
+```
+
+Windows (PowerShell):
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."   # or OPENAI_API_KEY for OpenAI
+
+wikimind init --name "AI Safety Research"
+Copy-Item "$HOME\papers\alignment.md" .wiki\raw\
+wikimind ingest .wiki\raw\alignment.md
 wikimind query "What are the key arguments about AI alignment?"
 wikimind query --save "Compare the methodologies across papers"
 wikimind lint
@@ -133,12 +153,14 @@ wikimind init --name "My Research"
 wikimind init --template research      # general (default) | code | research | book
 ```
 
+> **Template tip:** See [docs/templates.md](docs/templates.md) to understand how the `--template` flag changes the folder structure and LLM instructions to fit different use cases.
+
 Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`.
 
 - `CLAUDE.md` — schema/instructions for Claude Code. For other AI tools, copy or generate:
-  - GitHub Copilot: `cp CLAUDE.md .github/copilot-instructions.md`
-  - OpenCode / generic: `wikimind generate --tool opencode` (creates `AGENTS.md`)
-  - Cursor: `cp CLAUDE.md .cursorrules`
+  - GitHub Copilot: `cp CLAUDE.md .github/copilot-instructions.md` (macOS/Linux) or `Copy-Item CLAUDE.md .github\copilot-instructions.md` (Windows)
+  - OpenCode: `wikimind generate --tool opencode` (creates `AGENTS.md` + `opencode.json`, all platforms)
+  - Cursor: `cp CLAUDE.md .cursorrules` (macOS/Linux) or `Copy-Item CLAUDE.md .cursorrules` (Windows)
 - If `CLAUDE.md` already exists, `wikimind init` appends its wiki section rather than overwriting.
 
 ---
@@ -147,10 +169,54 @@ Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`
 
 ```bash
 wikimind generate --tool vscode     # Creates/updates .vscode/mcp.json for Copilot MCP
-wikimind generate --tool opencode   # Creates/updates AGENTS.md from CLAUDE.md
+wikimind generate --tool opencode   # Creates/updates AGENTS.md + opencode.json for OpenCode
 ```
 
 Automates setup for specific AI clients by generating their required configuration files and injecting the WikiMind instructions.
+
+**`--tool opencode`** writes two files:
+
+| File | Action |
+|------|--------|
+| `AGENTS.md` | Created (or WikiMind section updated) — OpenCode reads this automatically |
+| `opencode.json` | Created if absent; `mcp.wikimind` entry added/updated if present |
+
+The executable path in `opencode.json` is resolved in order:
+1. `command` already recorded in `.mcp.json` (written by `wikimind init`)
+2. Active virtual-environment scripts directory
+3. Bare `wikimind` (assumes it is on `PATH`)
+
+Example generated `opencode.json` (path format depends on your platform):
+
+Windows:
+```json
+{
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+        "wikimind": {
+            "type": "local",
+            "command": ["C:\\path\\to\\project\\.venv\\Scripts\\wikimind.exe", "serve"],
+            "enabled": true
+        }
+    }
+}
+```
+
+macOS / Linux:
+```json
+{
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+        "wikimind": {
+            "type": "local",
+            "command": ["/path/to/project/.venv/bin/wikimind", "serve"],
+            "enabled": true
+        }
+    }
+}
+```
+
+Existing keys in `opencode.json` (themes, other MCP servers, etc.) are preserved.
 
 ---
 
@@ -240,7 +306,19 @@ WikiMind's MCP server works with any MCP-compatible AI assistant. Two transport 
 - **stdio** (default) — client spawns the server as a subprocess. Used by Claude Code, Cursor, OpenCode.
 - **SSE** — client connects to a running HTTP server. Used by some web-based clients.
 
-`wikimind init` auto-generates `.mcp.json` for Claude Code. For other tools, use `wikimind generate` or configure manually using the examples below. Replace `wikimind` with the full venv path if not installed globally.
+`wikimind init` auto-generates `.mcp.json` for Claude Code. For other tools, use `wikimind generate` or configure manually using the examples below.
+
+> **Path note:** When you configure the `command` manually, use the **full absolute path** to the
+> `wikimind` executable inside your virtual environment. AI clients often start the MCP server
+> from a clean environment that does not inherit your shell's `PATH`.
+>
+> | Platform | venv executable path |
+> |----------|----------------------|
+> | Windows | `.venv\Scripts\wikimind.exe` |
+> | macOS / Linux | `.venv/bin/wikimind` |
+>
+> `wikimind generate` resolves and writes the correct path automatically — you only need
+> to care about this when editing config files by hand.
 
 ---
 
@@ -248,24 +326,36 @@ WikiMind's MCP server works with any MCP-compatible AI assistant. Two transport 
 
 Reads `.mcp.json` from the project root automatically — nothing extra needed after `wikimind init`.
 
-**`.mcp.json`** (auto-generated, edit if needed):
+**`.mcp.json`** (auto-generated by `wikimind init`, edit if needed):
+
+Windows:
 ```json
 {
   "mcpServers": {
     "wikimind": {
-      "command": "wikimind",
+      "command": "C:\\path\\to\\project\\.venv\\Scripts\\wikimind.exe",
       "args": ["serve"],
-      "cwd": "/path/to/your/project"
+      "cwd": "C:\\path\\to\\project"
     }
   }
 }
 ```
 
-Also copy the schema file so Claude reads the wiki instructions:
-```bash
-# Already created by wikimind init — no action needed
-# CLAUDE.md is read automatically by Claude Code
+macOS / Linux:
+```json
+{
+  "mcpServers": {
+    "wikimind": {
+      "command": "/path/to/project/.venv/bin/wikimind",
+      "args": ["serve"],
+      "cwd": "/path/to/project"
+    }
+  }
+}
 ```
+
+`wikimind init` fills in the correct paths for your platform automatically.
+`CLAUDE.md` is read by Claude Code automatically — no extra step needed.
 
 ---
 
@@ -278,9 +368,43 @@ wikimind generate --tool vscode
 ```
 This automatically creates `.vscode/mcp.json` with the correct absolute path to your virtual environment's `wikimind` executable (required because VS Code may not inherit your shell's `PATH`).
 
-*(Manual alternative: Create `.vscode/mcp.json` and set `command` to the full path of `.venv/Scripts/wikimind` or `.venv/bin/wikimind` with args `["serve"]` and cwd `"${workspaceFolder}"`)*
+*(Manual alternative — create `.vscode/mcp.json` with the `wikimind` entry below, using the full path for your platform)*
+
+Windows `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "wikimind": {
+      "command": "C:\\path\\to\\project\\.venv\\Scripts\\wikimind.exe",
+      "args": ["serve"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
+```
+
+macOS / Linux `.vscode/mcp.json`:
+```json
+{
+  "servers": {
+    "wikimind": {
+      "command": "/path/to/project/.venv/bin/wikimind",
+      "args": ["serve"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
+```
 
 **Step 2** — Copy the schema file to the Copilot instructions location:
+
+Windows (PowerShell):
+```powershell
+New-Item -ItemType Directory -Force .github
+Copy-Item CLAUDE.md .github\copilot-instructions.md
+```
+
+macOS / Linux:
 ```bash
 mkdir -p .github
 cp CLAUDE.md .github/copilot-instructions.md
@@ -292,20 +416,42 @@ Copilot reads `.github/copilot-instructions.md` automatically for repo-level ins
 
 ### Cursor
 
-**Step 1** — Add MCP server to `.cursor/mcp.json` (project) or global Cursor MCP settings:
+**Step 1** — Add MCP server to `.cursor/mcp.json` (project) or global Cursor MCP settings.
+
+Windows:
 ```json
 {
   "mcpServers": {
     "wikimind": {
-      "command": "wikimind",
+      "command": "C:\\path\\to\\project\\.venv\\Scripts\\wikimind.exe",
       "args": ["serve"],
-      "cwd": "/path/to/your/project"
+      "cwd": "C:\\path\\to\\project"
     }
   }
 }
 ```
 
-**Step 2** — Copy the schema file:
+macOS / Linux:
+```json
+{
+  "mcpServers": {
+    "wikimind": {
+      "command": "/path/to/project/.venv/bin/wikimind",
+      "args": ["serve"],
+      "cwd": "/path/to/project"
+    }
+  }
+}
+```
+
+**Step 2** — Copy the schema file.
+
+Windows (PowerShell):
+```powershell
+Copy-Item CLAUDE.md .cursorrules
+```
+
+macOS / Linux:
 ```bash
 cp CLAUDE.md .cursorrules
 ```
@@ -314,25 +460,47 @@ cp CLAUDE.md .cursorrules
 
 ### OpenCode
 
-**Step 1** — Add MCP server to `opencode.json` in the project root:
-```json
-{
-  "mcp": {
-    "wikimind": {
-      "type": "local",
-      "command": ["wikimind", "serve"],
-      "cwd": "/path/to/your/project"
-    }
-  }
-}
-```
+Run a single command — it generates both files:
 
-**Step 2** — Copy the schema file:
 ```bash
 wikimind generate --tool opencode
 ```
 
-OpenCode reads `AGENTS.md` automatically.
+This creates (or updates) two files:
+- **`opencode.json`** — MCP server config with the correct absolute path to the `wikimind` executable.
+- **`AGENTS.md`** — WikiMind wiki instructions. OpenCode reads this automatically.
+
+The executable path is taken from `.mcp.json` if `wikimind init` was already run, so you never need to hard-code it.
+
+*(Manual alternative: add the entry below to `opencode.json` and copy `CLAUDE.md` → `AGENTS.md` — use `cp CLAUDE.md AGENTS.md` on macOS/Linux or `Copy-Item CLAUDE.md AGENTS.md` on Windows)*
+
+Windows:
+```json
+{
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+        "wikimind": {
+            "type": "local",
+            "command": ["C:\\path\\to\\project\\.venv\\Scripts\\wikimind.exe", "serve"],
+            "enabled": true
+        }
+    }
+}
+```
+
+macOS / Linux:
+```json
+{
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+        "wikimind": {
+            "type": "local",
+            "command": ["/path/to/project/.venv/bin/wikimind", "serve"],
+            "enabled": true
+        }
+    }
+}
+```
 
 ---
 
@@ -534,6 +702,7 @@ scripts/               # Build scripts (bash + PowerShell)
 | [GAPS.md](GAPS.md) | Gap analysis vs. original Karpathy idea — 9 open items, 1 done |
 | [PROGRESS.md](PROGRESS.md) | Phase-by-phase implementation tracker with session log |
 | [CHEATSHEET.md](CHEATSHEET.md) | Quick-reference operator guide for daily use |
+| [docs/templates.md](docs/templates.md) | Explanation of the `general`, `code`, `research`, and `book` templates |
 | [docs/search-comparison.md](docs/search-comparison.md) | Retrieval backend comparison (BM25 vs. qmd vs. embeddings) |
 | [docs/qmd-setup.md](docs/qmd-setup.md) | Full qmd integration guide with troubleshooting |
 
