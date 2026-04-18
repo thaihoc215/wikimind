@@ -698,9 +698,6 @@ scripts/               # Build scripts (bash + PowerShell)
 
 | File | Description |
 |------|-------------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Component overview, data flow diagrams (Mermaid), MCP threading model |
-| [GAPS.md](GAPS.md) | Gap analysis vs. original Karpathy idea — 9 open items, 1 done |
-| [PROGRESS.md](PROGRESS.md) | Phase-by-phase implementation tracker with session log |
 | [CHEATSHEET.md](CHEATSHEET.md) | Quick-reference operator guide for daily use |
 | [docs/templates.md](docs/templates.md) | Explanation of the `general`, `code`, `research`, and `book` templates |
 | [docs/search-comparison.md](docs/search-comparison.md) | Retrieval backend comparison (BM25 vs. qmd vs. embeddings) |
@@ -727,5 +724,3 @@ scripts/               # Build scripts (bash + PowerShell)
 | Interactive ingest (`--focus` flag) | Planned |
 | `wikimind synthesize` (regenerate overview.md) | Planned |
 | Atomic MCP ingest tool (`wiki_ingest_source`) | Planned |
-
-See [GAPS.md](GAPS.md) for the full gap analysis and planned improvements.
