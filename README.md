@@ -135,11 +135,22 @@ wikimind init --template research      # general (default) | code | research | b
 
 Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`.
 
-- `CLAUDE.md` — schema/instructions for Claude Code. For other AI tools, copy or symlink:
+- `CLAUDE.md` — schema/instructions for Claude Code. For other AI tools, copy or generate:
   - GitHub Copilot: `cp CLAUDE.md .github/copilot-instructions.md`
-  - OpenCode / generic: `cp CLAUDE.md AGENTS.md`
+  - OpenCode / generic: `wikimind generate --tool opencode` (creates `AGENTS.md`)
   - Cursor: `cp CLAUDE.md .cursorrules`
 - If `CLAUDE.md` already exists, `wikimind init` appends its wiki section rather than overwriting.
+
+---
+
+### `wikimind generate`
+
+```bash
+wikimind generate --tool vscode     # Creates/updates .vscode/mcp.json for Copilot MCP
+wikimind generate --tool opencode   # Creates/updates AGENTS.md from CLAUDE.md
+```
+
+Automates setup for specific AI clients by generating their required configuration files and injecting the WikiMind instructions.
 
 ---
 
@@ -229,7 +240,7 @@ WikiMind's MCP server works with any MCP-compatible AI assistant. Two transport 
 - **stdio** (default) — client spawns the server as a subprocess. Used by Claude Code, Cursor, OpenCode.
 - **SSE** — client connects to a running HTTP server. Used by some web-based clients.
 
-`wikimind init` auto-generates `.mcp.json` for Claude Code. For other tools, configure manually using the examples below. Replace `wikimind` with the full venv path if not installed globally.
+`wikimind init` auto-generates `.mcp.json` for Claude Code. For other tools, use `wikimind generate` or configure manually using the examples below. Replace `wikimind` with the full venv path if not installed globally.
 
 ---
 
@@ -260,21 +271,14 @@ Also copy the schema file so Claude reads the wiki instructions:
 
 ### GitHub Copilot (VS Code)
 
-**Step 1** — Add MCP server to VS Code settings:
+**Step 1** — Generate MCP server config:
 
-`.vscode/mcp.json` (workspace) or user `settings.json`:
-```json
-{
-  "servers": {
-    "wikimind": {
-      "type": "stdio",
-      "command": "wikimind",
-      "args": ["serve"],
-      "cwd": "/path/to/your/project"
-    }
-  }
-}
+```bash
+wikimind generate --tool vscode
 ```
+This automatically creates `.vscode/mcp.json` with the correct absolute path to your virtual environment's `wikimind` executable (required because VS Code may not inherit your shell's `PATH`).
+
+*(Manual alternative: Create `.vscode/mcp.json` and set `command` to the full path of `.venv/Scripts/wikimind` or `.venv/bin/wikimind` with args `["serve"]` and cwd `"${workspaceFolder}"`)*
 
 **Step 2** — Copy the schema file to the Copilot instructions location:
 ```bash
@@ -325,7 +329,7 @@ cp CLAUDE.md .cursorrules
 
 **Step 2** — Copy the schema file:
 ```bash
-cp CLAUDE.md AGENTS.md
+wikimind generate --tool opencode
 ```
 
 OpenCode reads `AGENTS.md` automatically.
