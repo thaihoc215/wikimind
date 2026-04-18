@@ -24,6 +24,15 @@ wikimind init --name "My Research"
 Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`.
 Default paths: `.wiki/raw/`, `.wiki/vault/`, and `.wiki/.wikimind/`.
 
+## Generate client configs
+
+```bash
+wikimind generate --tool opencode   # creates AGENTS.md + opencode.json (OpenCode)
+wikimind generate --tool vscode     # creates .vscode/mcp.json (Copilot)
+```
+
+Reads `.mcp.json` to resolve the correct executable path automatically.
+
 ## Packaging Wheel
 
 ```bash

@@ -52,7 +52,9 @@ def _update_claude_md(dest: Path, new_section: str, force: bool) -> str:
     if _WIKIMIND_START in existing and _WIKIMIND_END in existing:
         before = existing[: existing.index(_WIKIMIND_START)]
         after = existing[existing.index(_WIKIMIND_END) + len(_WIKIMIND_END) :]
-        dest.write_text(before.rstrip() + "\n\n" + new_section + after.lstrip(), encoding="utf-8")
+        dest.write_text(
+            before.rstrip() + "\n\n" + new_section + after.lstrip(), encoding="utf-8"
+        )
         return "updated"
 
     # Case 2: old format (no markers) — only replace if --force
@@ -83,7 +85,7 @@ def init(
         False,
         "--force",
         help="Replace the WikiMind section in CLAUDE.md with the new template. "
-             "Your own content outside the <!-- wikimind:start/end --> markers is never touched.",
+        "Your own content outside the <!-- wikimind:start/end --> markers is never touched.",
     ),
 ):
     """Initialize WikiMind in the current directory."""
@@ -133,7 +135,9 @@ def init(
     if template_toml_path.exists():
         try:
             tpl_parsed = tomllib.loads(template_toml_path.read_text(encoding="utf-8"))
-            template_categories = list(tpl_parsed.get("wiki", {}).get("categories", {}).keys())
+            template_categories = list(
+                tpl_parsed.get("wiki", {}).get("categories", {}).keys()
+            )
         except tomllib.TOMLDecodeError:
             pass
 
@@ -176,9 +180,13 @@ def init(
             if status == "created":
                 console.print(f"  [green]Created[/green]   CLAUDE.md")
             elif status == "merged":
-                console.print(f"  [yellow]Merged[/yellow]   CLAUDE.md (appended WikiMind section)")
+                console.print(
+                    f"  [yellow]Merged[/yellow]   CLAUDE.md (appended WikiMind section)"
+                )
             elif status == "updated":
-                console.print(f"  [green]Updated[/green]   CLAUDE.md (WikiMind section replaced with '{template}' template)")
+                console.print(
+                    f"  [green]Updated[/green]   CLAUDE.md (WikiMind section replaced with '{template}' template)"
+                )
             else:  # skipped
                 console.print(
                     f"  [dim]Skipped[/dim]  CLAUDE.md (already has WikiMind section — use --force to replace)"
@@ -199,7 +207,11 @@ def init(
                 continue
 
         content = render(src.read_text(encoding="utf-8"))
-        dest = root / src.name if src.name not in ("index.md", "overview.md") else wiki_path / src.name
+        dest = (
+            root / src.name
+            if src.name not in ("index.md", "overview.md")
+            else wiki_path / src.name
+        )
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         console.print(f"  [green]Created[/green]   {display_path(dest)}")
@@ -245,6 +257,178 @@ def init(
     )
 
 
+# ── generate ──────────────────────────────────────────────────────────────────
+
+
+def _resolve_wikimind_exe(root: Path) -> str:
+    """Resolve the wikimind executable path.
+
+    Preference order:
+    1. ``command`` recorded in .mcp.json (already resolved by ``wikimind init``)
+    2. Executable in the current virtual-environment's scripts/bin directory
+    3. Bare ``wikimind`` (assumes it is on PATH)
+    """
+    mcp_json = root / ".mcp.json"
+    if mcp_json.exists():
+        try:
+            data = json.loads(mcp_json.read_text(encoding="utf-8"))
+            cmd = data.get("mcpServers", {}).get("wikimind", {}).get("command", "")
+            if cmd and isinstance(cmd, str) and Path(cmd).exists():
+                return cmd
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    venv_scripts = Path(sys.executable).parent
+    wikimind_exe = venv_scripts / "wikimind.exe"
+    wikimind_bin = venv_scripts / "wikimind"
+    if wikimind_exe.exists():
+        return str(wikimind_exe)
+    if wikimind_bin.exists():
+        return str(wikimind_bin)
+    return "wikimind"
+
+
+def _generate_opencode(root: Path) -> None:
+    """Generate AGENTS.md and opencode.json for OpenCode integration."""
+    claude_md = root / "CLAUDE.md"
+    agents_md = root / "AGENTS.md"
+
+    if not claude_md.exists():
+        console.print(
+            "[red]CLAUDE.md not found.[/red] Run 'wikimind init' first to create it."
+        )
+        raise typer.Exit(1)
+
+    content = claude_md.read_text(encoding="utf-8")
+
+    # Extract only the wikimind section if markers are present; otherwise use full content
+    if _WIKIMIND_START in content and _WIKIMIND_END in content:
+        start = content.index(_WIKIMIND_START)
+        end = content.index(_WIKIMIND_END) + len(_WIKIMIND_END)
+        wikimind_section = content[start:end]
+    else:
+        wikimind_section = content.strip()
+
+    # Create or update AGENTS.md — always replace wikimind section (force=True)
+    status = _update_claude_md(agents_md, wikimind_section, force=True)
+    if status == "created":
+        console.print("  [green]Created[/green]   AGENTS.md")
+    elif status == "merged":
+        console.print(
+            "  [yellow]Merged[/yellow]    AGENTS.md (WikiMind section appended)"
+        )
+    elif status == "updated":
+        console.print(
+            "  [green]Updated[/green]   AGENTS.md (WikiMind section replaced)"
+        )
+
+    # Create or update opencode.json with the wikimind MCP entry
+    _generate_opencode_json(root)
+
+
+def _generate_opencode_json(root: Path) -> None:
+    """Create or update opencode.json with the wikimind MCP server entry."""
+    opencode_json = root / "opencode.json"
+    exe = _resolve_wikimind_exe(root)
+
+    wikimind_entry: dict = {
+        "type": "local",
+        "command": [exe, "serve"],
+        "enabled": True,
+    }
+
+    if opencode_json.exists():
+        try:
+            existing = json.loads(opencode_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            console.print(
+                "[yellow]Warning:[/yellow] opencode.json is not valid JSON — overwriting."
+            )
+            existing = {}
+
+        mcp = existing.get("mcp", {})
+        action = "Updated" if "wikimind" in mcp else "Added"
+        mcp["wikimind"] = wikimind_entry
+        existing["mcp"] = mcp
+        # Ensure $schema is present without disturbing the rest of the object
+        if "$schema" not in existing:
+            existing = {"$schema": "https://opencode.ai/config.json", **existing}
+        opencode_json.write_text(json.dumps(existing, indent=4), encoding="utf-8")
+        console.print(
+            f"  [green]{action}[/green]    opencode.json (wikimind MCP entry)"
+        )
+    else:
+        config = {
+            "$schema": "https://opencode.ai/config.json",
+            "mcp": {
+                "wikimind": wikimind_entry,
+            },
+        }
+        opencode_json.write_text(json.dumps(config, indent=4), encoding="utf-8")
+        console.print("  [green]Created[/green]   opencode.json")
+
+
+def _generate_vscode(root: Path) -> None:
+    """Generate or update .vscode/mcp.json for VSCode Copilot MCP integration."""
+    vscode_dir = root / ".vscode"
+    mcp_path = vscode_dir / "mcp.json"
+
+    command = _resolve_wikimind_exe(root)
+    wikimind_server = {
+        "command": command,
+        "args": ["serve"],
+        "cwd": str(root),
+    }
+
+    vscode_dir.mkdir(exist_ok=True)
+
+    if mcp_path.exists():
+        try:
+            existing = json.loads(mcp_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            console.print(
+                "[yellow]Warning:[/yellow] .vscode/mcp.json is not valid JSON — overwriting."
+            )
+            existing = {}
+        servers = existing.get("servers", {})
+        action = "Updated" if "wikimind" in servers else "Added"
+        servers["wikimind"] = wikimind_server
+        existing["servers"] = servers
+        mcp_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        console.print(
+            f"  [green]{action}[/green]    .vscode/mcp.json (wikimind server entry)"
+        )
+    else:
+        config = {"servers": {"wikimind": wikimind_server}}
+        mcp_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        console.print("  [green]Created[/green]   .vscode/mcp.json")
+
+
+@app.command()
+def generate(
+    tool: str = typer.Option(
+        ...,
+        "--tool",
+        help="Tool to generate config for: opencode | vscode",
+    ),
+):
+    """Generate tool-specific configuration files for WikiMind integration.
+
+    \b
+    --tool opencode   Create/update AGENTS.md + opencode.json (MCP config for OpenCode)
+    --tool vscode     Create/update .vscode/mcp.json for VSCode Copilot MCP
+    """
+    root = Path.cwd()
+
+    if tool == "opencode":
+        _generate_opencode(root)
+    elif tool == "vscode":
+        _generate_vscode(root)
+    else:
+        console.print(f"[red]Unknown tool:[/red] '{tool}'. Available: opencode, vscode")
+        raise typer.Exit(1)
+
+
 # ── ingest ────────────────────────────────────────────────────────────────────
 
 
@@ -264,7 +448,12 @@ def ingest(
     from wikimind.retrieval import RetrievalError, make_retriever
 
     try:
-        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
+        retriever = make_retriever(
+            store,
+            backend=cfg.wiki.retrieval_backend,
+            wiki_config=cfg.wiki,
+            root=cfg.root,
+        )
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
         raise typer.Exit(1)
@@ -340,7 +529,9 @@ def ingest(
                 )
                 console.print("[green]qmd embeddings refreshed.[/green]")
             except subprocess.TimeoutExpired:
-                console.print("[yellow]Warning: qmd embed timed out after 120s.[/yellow]")
+                console.print(
+                    "[yellow]Warning: qmd embed timed out after 120s.[/yellow]"
+                )
             except Exception as e:
                 console.print(f"[yellow]Warning: qmd embed failed: {e}[/yellow]")
 
@@ -367,7 +558,12 @@ def query(
     from wikimind.retrieval import RetrievalError, make_retriever
 
     try:
-        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
+        retriever = make_retriever(
+            store,
+            backend=cfg.wiki.retrieval_backend,
+            wiki_config=cfg.wiki,
+            root=cfg.root,
+        )
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
         raise typer.Exit(1)
@@ -483,9 +679,7 @@ def lint(
         )
         for src in report.stale_sources:
             console.print(f"  • {src}")
-        console.print(
-            f"  [dim]Run 'wikimind ingest <file>' to re-ingest.[/dim]"
-        )
+        console.print(f"  [dim]Run 'wikimind ingest <file>' to re-ingest.[/dim]")
 
     if report.missing_frontmatter:
         console.print(
@@ -619,9 +813,7 @@ def cost(
 
 @app.command()
 def watch(
-    interval: float = typer.Option(
-        5.0, "--interval", help="Poll interval in seconds"
-    ),
+    interval: float = typer.Option(5.0, "--interval", help="Poll interval in seconds"),
     force: bool = typer.Option(
         False, "--force", help="Re-ingest even if file is unchanged"
     ),
@@ -636,7 +828,12 @@ def watch(
     store = WikiStore(cfg.wiki_path, cfg.raw_path)
 
     try:
-        retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
+        retriever = make_retriever(
+            store,
+            backend=cfg.wiki.retrieval_backend,
+            wiki_config=cfg.wiki,
+            root=cfg.root,
+        )
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
         raise typer.Exit(1)
@@ -663,7 +860,9 @@ def watch(
                 llm = _make_llm(cfg)
                 for f in to_process:
                     label = "new" if f in unprocessed else "changed"
-                    console.print(f"  Auto-ingesting ([dim]{label}[/dim]): [bold]{f.name}[/bold]")
+                    console.print(
+                        f"  Auto-ingesting ([dim]{label}[/dim]): [bold]{f.name}[/bold]"
+                    )
                     try:
                         result = _ingest(
                             f, store, llm, retriever=retriever, force=force

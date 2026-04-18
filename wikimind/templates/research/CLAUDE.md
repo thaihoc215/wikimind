@@ -28,6 +28,7 @@ Follow this default order (wiki-first):
 5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
 6. **After significant code/source changes**, update affected wiki pages (`wiki_write_page`),
    update index if needed (`wiki_update_index`), and append log (`wiki_append_log`).
+   Log entry must be a single bullet line: `- [YYYY-MM-DD] action | one-line summary`
 7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
 8. If paths are customized in `wikimind.toml`, always follow configured paths.
 9. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
@@ -54,16 +55,12 @@ silently overwriting.
 ## CLI commands
 
 ```bash
-wikimind ingest .wiki/raw/paper.pdf        # Process a PDF paper into wiki pages
-wikimind ingest .wiki/raw/notes.md         # Process markdown notes
-wikimind ingest .wiki/raw/file.md --dry-run  # Show plan without writing
+wikimind ingest .wiki/raw/paper.pdf  # Process a PDF paper into wiki pages
+wikimind ingest .wiki/raw/notes.md   # Process markdown notes
 wikimind query "question"            # Ask the wiki a question
 wikimind query --save "question"     # Ask and save the answer as a wiki page
 wikimind lint                        # Health-check the wiki
 wikimind lint --fix                  # Auto-fix wiki issues
 wikimind lint --semantic             # Semantic check (contradictions, gaps, source ideas)
-wikimind status                      # Show wiki stats
-wikimind cost                        # Show LLM token usage history
-wikimind watch                       # Auto-ingest new/changed files in raw/
 ```
 <!-- wikimind:end -->

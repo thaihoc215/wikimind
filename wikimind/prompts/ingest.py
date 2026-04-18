@@ -68,7 +68,7 @@ INGEST_TOOL = {
             },
             "log_entry": {
                 "type": "string",
-                "description": "Entry for log.md. Format: ## [YYYY-MM-DD] ingest | Title",
+                "description": "Entry for log.md. Single bullet line. Format: - [YYYY-MM-DD] ingest | Title (N pages created/updated)",
             },
             "summary": {
                 "type": "string",
