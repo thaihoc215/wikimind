@@ -148,7 +148,7 @@ def create_server(root: Path | None = None) -> FastMCP:
             if not path.endswith(".md"):
                 try:
                     content = store.read_page(path + ".md")
-                    logger.info("wiki_read_page | path=%r bytes=%d (auto .md)", path, len(content))
+                    logger.warning("wiki_read_page | auto-appended .md to path=%r — include .md explicitly", path)
                     return content
                 except (FileNotFoundError, ValueError):
                     pass
@@ -218,12 +218,19 @@ def create_server(root: Path | None = None) -> FastMCP:
             ---
 
         Use [[wikilinks]] to cross-reference between pages.
-        File paths use kebab-case: entities/some-entity.md
+        File paths MUST end with .md and use kebab-case: entities/some-entity.md
+        The .md extension is required — pages without it are invisible to search
+        and listing tools. If omitted, it is appended automatically.
 
         Args:
-            path: Relative path within wiki/ (e.g. 'entities/openai.md')
+            path: Relative path within wiki/ (e.g. 'entities/openai.md'). MUST end with .md.
             content: Full markdown content including YAML frontmatter
         """
+        # Normalise: always ensure the .md extension so the page is visible to
+        # wiki_list_pages, wiki_search, and all retrieval backends (all use rglob("*.md")).
+        if not path.endswith(".md"):
+            logger.warning("wiki_write_page | auto-appended .md to path=%r", path)
+            path = path + ".md"
         try:
             action = "updated" if store.page_exists(path) else "created"
             store.write_page(path, content)
@@ -267,6 +274,68 @@ def create_server(root: Path | None = None) -> FastMCP:
         store.append_log(entry)
         logger.info("wiki_append_log | entry=%r", entry[:80])
         return "OK: log entry appended"
+
+    @mcp.tool()
+    def wiki_delete_page(path: str) -> str:
+        """Delete a wiki page permanently.
+
+        Protected system files (index.md, log.md) cannot be deleted.
+        The page's entry in index.md is removed automatically.
+
+        Args:
+            path: Relative path of the page to delete (e.g. 'entities/old-page.md')
+        """
+        if not path.endswith(".md"):
+            path = path + ".md"
+        try:
+            store.delete_page(path)
+            logger.info("wiki_delete_page | deleted path=%r", path)
+            with _embed_lock:
+                _embed_dirty[0] = True
+            _trigger_embed()
+            return f"OK: deleted wiki/{path}"
+        except FileNotFoundError as e:
+            logger.warning("wiki_delete_page | not_found path=%r", path)
+            return f"Page not found: {e}"
+        except ValueError as e:
+            logger.warning("wiki_delete_page | refused path=%r error=%s", path, e)
+            return f"Cannot delete: {e}"
+
+    @mcp.tool()
+    def wiki_move_page(src_path: str, dst_path: str) -> str:
+        """Move or rename a wiki page.
+
+        The destination must not already exist. Both paths must stay within
+        the wiki/ directory. After moving:
+          - index.md entries referencing the old path are rewritten to the new name.
+          - [[wikilinks]] in all other pages are updated to point to the new name.
+
+        The .md extension is appended automatically if omitted on either path.
+
+        Args:
+            src_path: Current relative path (e.g. 'entities/old-name.md')
+            dst_path: New relative path (e.g. 'entities/new-name.md')
+        """
+        if not src_path.endswith(".md"):
+            src_path = src_path + ".md"
+        if not dst_path.endswith(".md"):
+            dst_path = dst_path + ".md"
+        try:
+            store.move_page(src_path, dst_path)
+            logger.info("wiki_move_page | %r -> %r", src_path, dst_path)
+            with _embed_lock:
+                _embed_dirty[0] = True
+            _trigger_embed()
+            return f"OK: moved wiki/{src_path} -> wiki/{dst_path}"
+        except FileNotFoundError as e:
+            logger.warning("wiki_move_page | not_found src=%r", src_path)
+            return f"Source not found: {e}"
+        except FileExistsError as e:
+            logger.warning("wiki_move_page | dst_exists dst=%r", dst_path)
+            return f"Destination already exists: {e}"
+        except ValueError as e:
+            logger.warning("wiki_move_page | invalid path src=%r dst=%r error=%s", src_path, dst_path, e)
+            return f"Invalid path: {e}"
 
     return mcp
 

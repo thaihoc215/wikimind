@@ -195,6 +195,120 @@ class WikiStore:
 
         index_path.write_text("\n".join(lines), encoding="utf-8")
 
+    def _remove_index_entries(self, relative_path: str) -> None:
+        """Remove index.md lines whose [[wikilink]] points to `relative_path`."""
+        index_path = self.wiki_path / "index.md"
+        if not index_path.exists():
+            return
+        rel_no_ext = relative_path[:-3] if relative_path.endswith(".md") else relative_path
+        stem = Path(relative_path).stem
+        text = index_path.read_text(encoding="utf-8")
+        lines = text.split("\n")
+        new_lines = []
+        for line in lines:
+            m = re.search(r"\[\[([^\]]+)\]\]", line)
+            if m:
+                normalized = self.normalize_wikilink_target(m.group(1))
+                if normalized in (rel_no_ext, stem):
+                    continue  # drop this entry
+            new_lines.append(line)
+        index_path.write_text("\n".join(new_lines), encoding="utf-8")
+
+    def _rewrite_wikilinks(
+        self,
+        old_rel_no_ext: str,
+        new_rel_no_ext: str,
+        skip_path: str | None = None,
+    ) -> int:
+        """Replace [[wikilinks]] pointing to old_rel_no_ext with the new stem across
+        all pages and index.md. Returns the number of files updated.
+        """
+        old_stem = Path(old_rel_no_ext).stem
+        new_stem = Path(new_rel_no_ext).stem
+        pattern = re.compile(r"\[\[([^\]]+)\]\]")
+
+        def replace_link(m: re.Match) -> str:
+            inner = m.group(1)
+            # Split alias: [[target|alias]]
+            if "|" in inner:
+                target_raw, alias = inner.split("|", 1)
+                alias_suffix = f"|{alias}"
+            else:
+                target_raw, alias_suffix = inner, ""
+            # Split anchor: [[target#anchor]]
+            if "#" in target_raw:
+                target_part, anchor = target_raw.split("#", 1)
+                anchor_suffix = f"#{anchor}"
+            else:
+                target_part, anchor_suffix = target_raw, ""
+            normalized = self.normalize_wikilink_target(target_part)
+            if normalized in (old_rel_no_ext, old_stem):
+                return f"[[{new_stem}{anchor_suffix}{alias_suffix}]]"
+            return m.group(0)
+
+        updated = 0
+        targets: list[Path] = [self.wiki_path / "index.md"] + list(self.all_pages())
+        for path in targets:
+            if not path.exists():
+                continue
+            rel = str(path.relative_to(self.wiki_path)).replace("\\", "/")
+            if skip_path and rel == skip_path:
+                continue
+            text = path.read_text(encoding="utf-8")
+            new_text = pattern.sub(replace_link, text)
+            if new_text != text:
+                path.write_text(new_text, encoding="utf-8")
+                updated += 1
+        return updated
+
+    def delete_page(self, relative_path: str) -> None:
+        """Delete a wiki page. Raises ValueError for protected system files."""
+        full_path = self._resolve_wiki_relative_path(relative_path)
+        rel = str(Path(relative_path).as_posix()).lstrip("/")
+        if rel in ("index.md", "log.md"):
+            raise ValueError(f"Cannot delete protected system file: {relative_path}")
+        if not full_path.exists():
+            raise FileNotFoundError(f"Page not found: {relative_path}")
+        full_path.unlink()
+        # Auto-remove matching index.md entries
+        self._remove_index_entries(relative_path)
+        # Remove empty parent directories up to (but not including) wiki_path
+        parent = full_path.parent
+        while parent != self.wiki_path and parent != parent.parent:
+            try:
+                parent.rmdir()  # only succeeds if empty
+                parent = parent.parent
+            except OSError:
+                break
+
+    def move_page(self, src_path: str, dst_path: str) -> None:
+        """Move/rename a wiki page. dst_path must not already exist."""
+        src_full = self._resolve_wiki_relative_path(src_path)
+        # Normalise dst extension
+        dst_normalised = dst_path if dst_path.endswith(".md") else dst_path + ".md"
+        dst_full = self._resolve_wiki_relative_path(dst_normalised)
+        src_rel = str(Path(src_path).as_posix()).lstrip("/")
+        if src_rel in ("index.md", "log.md"):
+            raise ValueError(f"Cannot move protected system file: {src_path}")
+        if not src_full.exists():
+            raise FileNotFoundError(f"Source page not found: {src_path}")
+        if dst_full.exists():
+            raise FileExistsError(f"Destination already exists: {dst_normalised}")
+        dst_full.parent.mkdir(parents=True, exist_ok=True)
+        src_full.rename(dst_full)
+        # Auto-update all [[wikilinks]] pointing to the old path (includes index.md)
+        old_rel_no_ext = src_path[:-3] if src_path.endswith(".md") else src_path
+        new_rel_no_ext = dst_normalised[:-3]
+        self._rewrite_wikilinks(old_rel_no_ext, new_rel_no_ext, skip_path=dst_normalised)
+        # Remove empty parent directories left behind
+        parent = src_full.parent
+        while parent != self.wiki_path and parent != parent.parent:
+            try:
+                parent.rmdir()
+                parent = parent.parent
+            except OSError:
+                break
+
     def append_log(self, entry: str) -> None:
         """Append an entry to log.md."""
         log_path = self.wiki_path / "log.md"

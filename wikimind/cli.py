@@ -241,6 +241,42 @@ def init(
     else:
         console.print(f"  [dim]Skipped[/dim]  .mcp.json (already exists)")
 
+    # Update AGENTS.md and copilot-instructions.md if they exist
+    # (extract WikiMind section from the rendered template)
+    wikimind_section = None
+    for src in template_dir.iterdir():
+        if src.name == "CLAUDE.md":
+            wikimind_section = render(src.read_text(encoding="utf-8"))
+            break
+
+    if wikimind_section:
+        # AGENTS.md — skip if doesn't exist
+        agents_md = root / "AGENTS.md"
+        if agents_md.exists():
+            status = _update_claude_md(agents_md, wikimind_section, force=force)
+            if status == "updated":
+                console.print(f"  [green]Updated[/green]   AGENTS.md (WikiMind section replaced)")
+            elif status == "merged":
+                console.print("  [yellow]Merged[/yellow]   AGENTS.md (WikiMind section appended)")
+            elif status == "created":
+                console.print("  [green]Created[/green]   AGENTS.md")
+        else:
+            console.print(f"  [dim]Skipped[/dim]  AGENTS.md (does not exist)")
+
+        # .github/copilot-instructions.md — skip if doesn't exist
+        github_dir = root / ".github"
+        copilot_instructions = github_dir / "copilot-instructions.md" if github_dir.exists() else None
+        if copilot_instructions and copilot_instructions.exists():
+            status = _update_claude_md(copilot_instructions, wikimind_section, force=force)
+            if status == "updated":
+                console.print(f"  [green]Updated[/green]   .github/copilot-instructions.md (WikiMind section replaced)")
+            elif status == "merged":
+                console.print("  [yellow]Merged[/yellow]   .github/copilot-instructions.md (WikiMind section appended)")
+            elif status == "created":
+                console.print("  [green]Created[/green]   .github/copilot-instructions.md")
+        else:
+            console.print(f"  [dim]Skipped[/dim]  .github/copilot-instructions.md (does not exist)")
+
     console.print()
     console.print(
         Panel(
@@ -369,7 +405,7 @@ def _generate_opencode_json(root: Path) -> None:
 
 
 def _generate_vscode(root: Path) -> None:
-    """Generate or update .vscode/mcp.json for VSCode Copilot MCP integration."""
+    """Generate or update .vscode/mcp.json and .github/copilot-instructions.md for VSCode Copilot."""
     vscode_dir = root / ".vscode"
     mcp_path = vscode_dir / "mcp.json"
 
@@ -402,6 +438,124 @@ def _generate_vscode(root: Path) -> None:
         config = {"servers": {"wikimind": wikimind_server}}
         mcp_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         console.print("  [green]Created[/green]   .vscode/mcp.json")
+
+    _generate_copilot_instructions(root)
+
+
+def _generate_copilot_instructions(root: Path) -> None:
+    """Generate or update .github/copilot-instructions.md for GitHub Copilot."""
+    github_dir = root / ".github"
+    copilot_instructions_path = github_dir / "copilot-instructions.md"
+    claude_md_path = root / "CLAUDE.md"
+
+    wiki_section = _get_wikimind_section_from_claude(claude_md_path)
+
+    if copilot_instructions_path.exists():
+        existing = copilot_instructions_path.read_text(encoding="utf-8")
+        if "<!-- wikimind:start -->" in existing and "<!-- wikimind:end -->" in existing:
+            console.print("  [dim]Skipped[/dim]   .github/copilot-instructions.md (wiki section already present)")
+            return
+
+        if wiki_section in existing:
+            console.print("  [dim]Skipped[/dim]   .github/copilot-instructions.md (wiki content already merged)")
+            return
+
+        copilot_instructions_path.write_text(existing.rstrip() + "\n\n---\n\n" + wiki_section, encoding="utf-8")
+        console.print("  [green]Updated[/green]  .github/copilot-instructions.md (wiki section appended)")
+    else:
+        github_dir.mkdir(exist_ok=True)
+        if claude_md_path.exists():
+            shutil.copy2(claude_md_path, copilot_instructions_path)
+            console.print("  [green]Copied[/green]    CLAUDE.md -> .github/copilot-instructions.md")
+        else:
+            copilot_instructions_path.write_text(wiki_section, encoding="utf-8")
+            console.print("  [green]Created[/green]   .github/copilot-instructions.md")
+
+
+def _get_wikimind_section_from_claude(claude_md_path: Path) -> str:
+    """Extract the WikiMind section from CLAUDE.md."""
+    if not claude_md_path.exists():
+        return _default_wikimind_section()
+
+    existing = claude_md_path.read_text(encoding="utf-8")
+    if _WIKIMIND_START in existing and _WIKIMIND_END in existing:
+        start_idx = existing.index(_WIKIMIND_START)
+        end_idx = existing.index(_WIKIMIND_END) + len(_WIKIMIND_END)
+        return existing[start_idx:end_idx]
+
+    if "# WikiMind Knowledge Base" in existing:
+        return _default_wikimind_section()
+
+    return _default_wikimind_section()
+
+
+def _default_wikimind_section() -> str:
+    """Return the default WikiMind section for Copilot instructions."""
+    return f"""<!-- wikimind:start -->
+# WikiMind Knowledge Base
+
+This project uses a persistent wiki in `.wiki/vault/` maintained by LLMs.
+
+## Structure
+
+- `.wiki/vault/index.md` — Master catalog of all wiki pages. **READ THIS FIRST.**
+- `.wiki/vault/log.md` — Chronological record of all wiki changes.
+- `.wiki/vault/overview.md` — High-level codebase overview.
+- `.wiki/vault/modules/` — Source files, classes, functions, components.
+- `.wiki/vault/apis/` — Endpoints, interfaces, contracts, schemas.
+- `.wiki/vault/patterns/` — Design patterns, architectural decisions, conventions.
+- `.wiki/vault/decisions/` — Architecture Decision Records (ADRs).
+- `.wiki/vault/sources/` — One summary page per raw source in `.wiki/raw/`.
+- `.wiki/vault/analyses/` — Saved query answers, comparisons, syntheses.
+- `.wiki/raw/` — Raw source documents. **Immutable — never modify these.**
+
+## When working on this project
+
+Follow this default order (wiki-first):
+
+1. **Before deep-diving into source files or broad code search**, use `wiki_search` first.
+2. **If relevant wiki pages exist**, read them with `wiki_read_page` and answer from wiki context.
+3. **Only read raw/source files when needed** (wiki is missing details, outdated, or exact code is required).
+4. **After answering questions or making discoveries**, save durable outputs with
+   `wikimind query --save "your question"` (or write an analysis page via MCP tools).
+5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
+6. **After significant code/source changes**, update affected wiki pages (`wiki_write_page`),
+   update index if needed (`wiki_update_index`), and append log (`wiki_append_log`).
+   Log entry must be a single bullet line: `- [YYYY-MM-DD] action | one-line summary`
+7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
+8. If paths are customized in `wikimind.toml`, always follow configured paths.
+9. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
+
+## Wiki page format
+
+Every wiki page must have YAML frontmatter:
+
+```yaml
+---
+title: Page Title
+type: module | api | pattern | decision | source | analysis | overview
+tags: [tag1, tag2]
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+sources: [sources/source-name]
+---
+```
+
+Use [[wikilinks]] to cross-reference between pages. When new information
+contradicts existing content, note the contradiction explicitly rather than
+silently overwriting.
+
+## CLI commands
+
+```bash
+wikimind ingest .wiki/raw/file.md    # Process a source into wiki pages
+wikimind query "question"            # Ask the wiki a question
+wikimind query --save "question"     # Ask and save the answer as a wiki page
+wikimind lint                        # Health-check the wiki
+wikimind lint --fix                  # Auto-fix wiki issues
+wikimind lint --semantic             # Semantic check (contradictions, gaps, source ideas)
+```
+<!-- wikimind:end -->"""
 
 
 @app.command()

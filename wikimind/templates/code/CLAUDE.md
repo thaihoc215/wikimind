@@ -9,9 +9,12 @@ This project uses a persistent wiki in `.wiki/vault/` maintained by LLMs.
 - `.wiki/vault/log.md` — Chronological record of all wiki changes.
 - `.wiki/vault/overview.md` — High-level codebase overview.
 - `.wiki/vault/modules/` — Source files, classes, functions, components.
-- `.wiki/vault/apis/` — Endpoints, interfaces, contracts, schemas.
+- `.wiki/vault/apis/` — API documentation overview: endpoints, request/response shapes, examples, summaries.
+- `.wiki/vault/apis/api-detail/` — API detail: business flow overview, business logic deep-dives, API layer internals.
 - `.wiki/vault/patterns/` — Design patterns, architectural decisions, conventions.
 - `.wiki/vault/decisions/` — Architecture Decision Records (ADRs).
+- `.wiki/vault/diagrams/` — All diagrams: Mermaid, UML, PlantUML, draw.io, etc.
+- `.wiki/vault/diagrams/apis/` — Diagrams specific to API flows and contracts.
 - `.wiki/vault/sources/` — One summary page per raw source in `.wiki/raw/`.
 - `.wiki/vault/analyses/` — Saved query answers, comparisons, syntheses.
 - `.wiki/raw/` — Raw source documents. **Immutable — never modify these.**

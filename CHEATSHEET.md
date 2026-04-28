@@ -28,7 +28,7 @@ Default paths: `.wiki/raw/`, `.wiki/vault/`, and `.wiki/.wikimind/`.
 
 ```bash
 wikimind generate --tool opencode   # creates AGENTS.md + opencode.json (OpenCode)
-wikimind generate --tool vscode     # creates .vscode/mcp.json (Copilot)
+wikimind generate --tool vscode     # creates .vscode/mcp.json + .github/copilot-instructions.md (Copilot)
 ```
 
 Reads `.mcp.json` to resolve the correct executable path automatically.
@@ -104,7 +104,7 @@ wikimind serve --transport sse
 - Claude Code starts this from `.mcp.json` in stdio mode.
 - Exposed tools: `wiki_read_index`, `wiki_read_page`, `wiki_search`,
   `wiki_list_pages`, `wiki_write_page`, `wiki_update_index`,
-  `wiki_append_log`, `wiki_status`.
+  `wiki_append_log`, `wiki_status`, `wiki_delete_page`, `wiki_move_page`.
 
 ## Config Snippet
 

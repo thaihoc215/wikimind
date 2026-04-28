@@ -12,7 +12,19 @@ Master catalog of all wiki pages. Updated automatically on every ingest.
 
 ## APIs
 
-<!-- API endpoint and interface pages -->
+<!-- API overview pages: endpoints, request/response shapes, examples, summaries -->
+
+### API Detail
+
+<!-- API detail pages: business flow, logic deep-dives, API layer internals -->
+
+## Diagrams
+
+<!-- All diagrams: Mermaid, UML, PlantUML, draw.io, etc. -->
+
+### API Diagrams
+
+<!-- Diagrams specific to API flows and contracts -->
 
 ## Patterns
 

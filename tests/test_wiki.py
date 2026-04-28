@@ -212,3 +212,80 @@ def test_is_already_ingested_handles_mixed_path_styles(
         assert tmp_wiki.is_already_ingested(rel)
     finally:
         os.chdir(old_cwd)
+
+
+# ── delete_page / move_page ────────────────────────────────────────────────
+
+def test_delete_page_removes_index_entry(tmp_wiki: WikiStore):
+    """Deleting a page should automatically remove its index.md entry."""
+    tmp_wiki.write_page("entities/gone.md", "# Gone")
+    tmp_wiki.update_index(["- [[gone]] — will be removed"], [])
+    assert "[[gone]]" in tmp_wiki.read_index()
+
+    tmp_wiki.delete_page("entities/gone.md")
+
+    assert not (tmp_wiki.wiki_path / "entities" / "gone.md").exists()
+    assert "[[gone]]" not in tmp_wiki.read_index()
+
+
+def test_delete_page_removes_full_path_index_entry(tmp_wiki: WikiStore):
+    """Index entry using full path form [[entities/gone]] is also removed."""
+    tmp_wiki.write_page("entities/gone.md", "# Gone")
+    tmp_wiki.update_index(["- [[entities/gone]] — full path form"], [])
+
+    tmp_wiki.delete_page("entities/gone.md")
+
+    assert "[[entities/gone]]" not in tmp_wiki.read_index()
+
+
+def test_move_page_rewrites_index_entry(tmp_wiki: WikiStore):
+    """Moving a page should rewrite its [[wikilink]] in index.md."""
+    tmp_wiki.write_page("entities/old.md", "# Old")
+    tmp_wiki.update_index(["- [[old]] — the old page"], [])
+
+    tmp_wiki.move_page("entities/old.md", "entities/new.md")
+
+    index = tmp_wiki.read_index()
+    assert "[[new]]" in index
+    assert "[[old]]" not in index
+
+
+def test_move_page_rewrites_wikilinks_in_other_pages(tmp_wiki: WikiStore):
+    """Moving a page should update [[wikilinks]] that reference it in other pages."""
+    tmp_wiki.write_page("entities/target.md", "# Target")
+    tmp_wiki.write_page(
+        "concepts/referrer.md",
+        "# Referrer\n\nSee [[target]] for details. Also [[target#section|label]].",
+    )
+
+    tmp_wiki.move_page("entities/target.md", "entities/renamed.md")
+
+    referrer = tmp_wiki.read_page("concepts/referrer.md")
+    assert "[[renamed]]" in referrer
+    assert "[[renamed#section|label]]" in referrer
+    assert "[[target]]" not in referrer
+
+
+def test_move_page_does_not_rewrite_unrelated_links(tmp_wiki: WikiStore):
+    """Moving a page must not corrupt wikilinks to unrelated pages."""
+    tmp_wiki.write_page("entities/foo.md", "# Foo")
+    tmp_wiki.write_page("entities/bar.md", "# Bar")
+    tmp_wiki.write_page("concepts/page.md", "# Page\n\nSee [[foo]] and [[bar]].")
+
+    tmp_wiki.move_page("entities/foo.md", "entities/foo-renamed.md")
+
+    content = tmp_wiki.read_page("concepts/page.md")
+    assert "[[foo-renamed]]" in content
+    assert "[[bar]]" in content  # unrelated link untouched
+
+
+def test_move_page_rewrites_full_path_wikilinks(tmp_wiki: WikiStore):
+    """[[entities/old]] form is also rewritten."""
+    tmp_wiki.write_page("entities/old.md", "# Old")
+    tmp_wiki.write_page("concepts/ref.md", "# Ref\n\nSee [[entities/old]].")
+
+    tmp_wiki.move_page("entities/old.md", "entities/new.md")
+
+    content = tmp_wiki.read_page("concepts/ref.md")
+    assert "[[new]]" in content
+    assert "[[entities/old]]" not in content

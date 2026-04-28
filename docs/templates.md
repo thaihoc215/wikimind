@@ -33,9 +33,12 @@ This template treats WikiMind as an architectural knowledge base. Rather than ge
 
 **Categories (Folders):**
 - `modules/` — Source files, classes, functions, components.
-- `apis/` — Endpoints, interfaces, contracts, schemas.
+- `apis/` — API documentation overview: endpoints, request/response shapes, examples, summaries.
+- `apis/api-detail/` — API detail: business flow overview, business logic deep-dives, API layer internals.
 - `patterns/` — Design patterns, architectural decisions, conventions.
 - `decisions/` — Architecture Decision Records (ADRs).
+- `diagrams/` — All diagrams: Mermaid, UML, PlantUML, draw.io, etc.
+- `diagrams/apis/` — Diagrams specific to API flows and contracts.
 - `sources/` — One summary page per raw source.
 - `analyses/` — Saved queries, comparisons, syntheses.
 

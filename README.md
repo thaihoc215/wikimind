@@ -168,11 +168,18 @@ Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`
 ### `wikimind generate`
 
 ```bash
-wikimind generate --tool vscode     # Creates/updates .vscode/mcp.json for Copilot MCP
+wikimind generate --tool vscode     # Creates/updates .vscode/mcp.json + .github/copilot-instructions.md
 wikimind generate --tool opencode   # Creates/updates AGENTS.md + opencode.json for OpenCode
 ```
 
 Automates setup for specific AI clients by generating their required configuration files and injecting the WikiMind instructions.
+
+**`--tool vscode`** writes two files:
+
+| File | Action |
+|------|--------|
+| `.vscode/mcp.json` | Created or updated with wikimind server entry |
+| `.github/copilot-instructions.md` | Created (copied from CLAUDE.md) or merged with wiki section |
 
 **`--tool opencode`** writes two files:
 
@@ -283,6 +290,8 @@ this manually — your AI client starts it automatically via its MCP config.
 | `wiki_update_index` | Add/remove index entries |
 | `wiki_append_log` | Append to `log.md` |
 | `wiki_status` | Wiki stats |
+| `wiki_delete_page` | Delete a page (protected: `index.md`, `log.md` cannot be deleted) |
+| `wiki_move_page` | Move/rename a page; updates index entries and wikilinks automatically |
 
 Read/write paths are sandboxed to the configured wiki directory — `../` and absolute paths are rejected.
 
@@ -361,14 +370,21 @@ macOS / Linux:
 
 ### GitHub Copilot (VS Code)
 
-**Step 1** — Generate MCP server config:
+Run a single command — it generates both files:
 
 ```bash
 wikimind generate --tool vscode
 ```
-This automatically creates `.vscode/mcp.json` with the correct absolute path to your virtual environment's `wikimind` executable (required because VS Code may not inherit your shell's `PATH`).
 
-*(Manual alternative — create `.vscode/mcp.json` with the `wikimind` entry below, using the full path for your platform)*
+This creates (or updates) two files:
+- **`.vscode/mcp.json`** — MCP server config with the correct absolute path to the wikimind executable.
+- **`.github/copilot-instructions.md`** — Copilot instructions (copied from CLAUDE.md, or merged with wiki section if already exists).
+
+The executable path is taken from `.mcp.json` if `wikimind init` was already run, so you never need to hard-code it.
+
+See [[analyses/generate-command]] for implementation details.
+
+*(Manual alternative — create `.vscode/mcp.json` with the entry below, and copy `CLAUDE.md` → `.github/copilot-instructions.md` manually)*
 
 Windows `.vscode/mcp.json`:
 ```json
@@ -394,20 +410,6 @@ macOS / Linux `.vscode/mcp.json`:
     }
   }
 }
-```
-
-**Step 2** — Copy the schema file to the Copilot instructions location:
-
-Windows (PowerShell):
-```powershell
-New-Item -ItemType Directory -Force .github
-Copy-Item CLAUDE.md .github\copilot-instructions.md
-```
-
-macOS / Linux:
-```bash
-mkdir -p .github
-cp CLAUDE.md .github/copilot-instructions.md
 ```
 
 Copilot reads `.github/copilot-instructions.md` automatically for repo-level instructions.
@@ -465,6 +467,8 @@ Run a single command — it generates both files:
 ```bash
 wikimind generate --tool opencode
 ```
+
+See [[analyses/generate-command]] for implementation details.
 
 This creates (or updates) two files:
 - **`opencode.json`** — MCP server config with the correct absolute path to the `wikimind` executable.
@@ -683,7 +687,7 @@ wikimind/              # Main package (~3,200 lines)
 ├── llm.py             # LLMClient + 3 provider adapters
 ├── llm_schema.py      # Typed validation for LLM tool outputs
 ├── retrieval.py       # Retriever protocol + 3 backends
-├── server.py          # FastMCP server (8 tools)
+├── server.py          # FastMCP server (10 tools)
 ├── operations/        # Business logic (ingest, query, lint)
 ├── prompts/           # LLM system prompts + tool schemas
 └── templates/         # Init templates (general, code, research, book)
