@@ -121,6 +121,103 @@ class BM25Retriever:
         return df
 
 
+def _find_git_sh() -> str | None:
+    """Find sh.exe from the Git for Windows installation."""
+    git = shutil.which("git")
+    if not git:
+        return None
+    for parent in Path(git).resolve().parents:
+        sh = parent / "usr" / "bin" / "sh.exe"
+        if sh.exists():
+            return str(sh)
+    return None
+
+
+def build_qmd_cmd(qmd_bin: str) -> list[str] | None:
+    """Return the subprocess prefix needed to invoke qmd, or None if not found.
+
+    On Windows, qmd's .CMD wrapper can delegate to /bin/sh, which is not
+    available from cmd.exe. Prefer Git's sh.exe and the underlying qmd script.
+    """
+    resolved = shutil.which(qmd_bin)
+    if not resolved:
+        return None
+    if sys.platform == "win32" and resolved.upper().endswith(".CMD"):
+        sh_exe = _find_git_sh()
+        script = Path(resolved).parent / "node_modules" / "@tobilu" / "qmd" / "bin" / "qmd"
+        if sh_exe and script.exists():
+            return [sh_exe, str(script)]
+        return ["cmd", "/c", resolved]
+    return [resolved]
+
+
+def _with_qmd_index(qmd_cmd: list[str], index_name: str | None) -> list[str]:
+    if not index_name:
+        return list(qmd_cmd)
+    return qmd_cmd + ["--index", index_name]
+
+
+def run_qmd_refresh(
+    qmd_cmd: list[str],
+    root: Path,
+    *,
+    capture_output: bool = True,
+    text: bool = True,
+    update_timeout: int = 120,
+    embed_timeout: int = 120,
+    index_name: str | None = None,
+    collection_name: str | None = None,
+    collection_path: str | None = None,
+) -> tuple[subprocess.CompletedProcess, subprocess.CompletedProcess | None]:
+    """Re-index qmd collections, then refresh embeddings for changed content."""
+    indexed_cmd = _with_qmd_index(qmd_cmd, index_name)
+    if collection_name and collection_path:
+        show_result = subprocess.run(
+            indexed_cmd + ["collection", "show", collection_name],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            cwd=str(root),
+            timeout=30,
+            check=False,
+        )
+        if show_result.returncode != 0:
+            add_result = subprocess.run(
+                indexed_cmd + ["collection", "add", collection_path, "--name", collection_name],
+                stdin=subprocess.DEVNULL,
+                capture_output=capture_output,
+                text=text,
+                cwd=str(root),
+                timeout=30,
+                check=False,
+            )
+            if add_result.returncode != 0:
+                return add_result, None
+
+    update_result = subprocess.run(
+        indexed_cmd + ["update"],
+        stdin=subprocess.DEVNULL,
+        capture_output=capture_output,
+        text=text,
+        cwd=str(root),
+        timeout=update_timeout,
+        check=False,
+    )
+    if update_result.returncode != 0:
+        return update_result, None
+
+    embed_result = subprocess.run(
+        indexed_cmd + ["embed"],
+        stdin=subprocess.DEVNULL,
+        capture_output=capture_output,
+        text=text,
+        cwd=str(root),
+        timeout=embed_timeout,
+        check=False,
+    )
+    return update_result, embed_result
+
+
 class QmdRetriever:
     """Retriever that delegates to the qmd CLI for hybrid/semantic search.
 
@@ -142,6 +239,8 @@ class QmdRetriever:
         mode: str = "vsearch",
         qmd_bin: str = "qmd",
         root: Path | None = None,
+        index_name: str | None = None,
+        collection_name: str | None = None,
     ):
         if mode not in self.VALID_MODES:
             raise RetrievalError(
@@ -152,6 +251,8 @@ class QmdRetriever:
         self.mode = mode
         self.qmd_bin = qmd_bin
         self.root = root or store.wiki_path.parent
+        self.index_name = index_name
+        self.collection_name = collection_name
         self._cmd_prefix: list[str] | None = None  # lazily resolved
 
     def _build_cmd_prefix(self) -> list[str]:
@@ -168,7 +269,7 @@ class QmdRetriever:
             and resolved
             and resolved.upper().endswith(".CMD")
         ):
-            sh_exe = self._find_git_sh(resolved)
+            sh_exe = _find_git_sh()
             script = Path(resolved).parent / "node_modules" / "@tobilu" / "qmd" / "bin" / "qmd"
             if sh_exe and script.exists():
                 return [sh_exe, str(script)]
@@ -177,14 +278,7 @@ class QmdRetriever:
     @staticmethod
     def _find_git_sh(cmd_path: str) -> str | None:
         """Find sh.exe from the Git for Windows installation."""
-        git = shutil.which("git")
-        if not git:
-            return None
-        for parent in Path(git).resolve().parents:
-            sh = parent / "usr" / "bin" / "sh.exe"
-            if sh.exists():
-                return str(sh)
-        return None
+        return _find_git_sh()
 
     def retrieve(self, query: str, top_k: int) -> dict[str, str]:
         if top_k <= 0 or not query.strip():
@@ -194,8 +288,12 @@ class QmdRetriever:
             self._cmd_prefix = self._build_cmd_prefix()
 
         try:
+            cmd = _with_qmd_index(self._cmd_prefix, self.index_name)
+            cmd += [self.mode, query, "--json"]
+            if self.collection_name:
+                cmd += ["-c", self.collection_name]
             result = subprocess.run(
-                self._cmd_prefix + [self.mode, query, "--json"],
+                cmd,
                 capture_output=True,
                 stdin=subprocess.DEVNULL,
                 text=True,
@@ -271,6 +369,8 @@ def make_retriever(
     backend: str = "index_keyword",
     wiki_config: WikiConfig | None = None,
     root: Path | None = None,
+    index_name: str | None = None,
+    collection_name: str | None = None,
 ) -> Retriever:
     normalized = (backend or "").strip().lower()
     if normalized in {"index_keyword", "keyword", "index"}:
@@ -287,7 +387,14 @@ def make_retriever(
                 stacklevel=2,
             )
             return BM25Retriever(store)
-        return QmdRetriever(store, mode=qmd_mode, qmd_bin=qmd_bin, root=root)
+        return QmdRetriever(
+            store,
+            mode=qmd_mode,
+            qmd_bin=qmd_bin,
+            root=root,
+            index_name=index_name,
+            collection_name=collection_name,
+        )
 
     raise RetrievalError(
         "Unsupported retrieval backend: "

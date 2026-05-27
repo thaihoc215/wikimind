@@ -3,6 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from wikimind.server import create_server
 
@@ -57,23 +58,85 @@ def test_server_registers_expected_tools(tmp_path: Path):
     }
 
 
+def test_server_instructions_make_writes_explicit_opt_in(tmp_path: Path):
+    _setup_project(tmp_path)
+    server = create_server(tmp_path)
+
+    assert "Write to the wiki only on explicit user request." in server.instructions
+    assert "update the wiki after analysis or discoveries" not in server.instructions
+
+
 def test_server_write_and_read_page(tmp_path: Path):
     _setup_project(tmp_path)
     server = create_server(tmp_path)
 
     content = "---\ntitle: OpenAI\ntype: entity\ntags: []\ncreated: 2026-04-09\nupdated: 2026-04-09\nsources: []\n---\n\n# OpenAI"
-    write_result = asyncio.run(
-        server.call_tool(
-            "wiki_write_page",
-            {"path": "entities/openai.md", "content": content},
+    with patch("wikimind.server.build_qmd_cmd", return_value=[]):
+        write_result = asyncio.run(
+            server.call_tool(
+                "wiki_write_page",
+                {"path": "entities/openai.md", "content": content},
+            )
         )
-    )
     assert "OK: created wiki/entities/openai.md" in _tool_result_value(write_result)
 
     read_result = asyncio.run(
         server.call_tool("wiki_read_page", {"path": "entities/openai.md"})
     )
     assert "# OpenAI" in _tool_result_value(read_result)
+
+
+def test_server_write_page_refreshes_qmd_index_before_embedding(tmp_path: Path):
+    _setup_project(tmp_path)
+    server = create_server(tmp_path)
+
+    threads = []
+
+    class CapturingThread:
+        def __init__(self, target, daemon=False):
+            self.target = target
+
+        def start(self):
+            threads.append(self)
+
+        def is_alive(self):
+            return False
+
+    content = "---\ntitle: OpenAI\ntype: entity\ntags: []\ncreated: 2026-04-09\nupdated: 2026-04-09\nsources: []\n---\n\n# OpenAI"
+    update_result = MagicMock(returncode=0)
+    embed_result = MagicMock(returncode=0)
+
+    with patch("wikimind.server.threading.Thread", CapturingThread), \
+         patch("wikimind.server.build_qmd_cmd", return_value=["qmd"]), \
+         patch("wikimind.server.run_qmd_refresh", return_value=(update_result, embed_result)) as refresh:
+        asyncio.run(
+            server.call_tool(
+                "wiki_write_page",
+                {"path": "entities/openai.md", "content": content},
+            )
+        )
+        threads[0].target()
+
+    refresh.assert_called_once_with(
+        ["qmd"],
+        tmp_path,
+        capture_output=True,
+        text=True,
+        index_name="Test Wiki",
+        collection_name="Test Wiki",
+        collection_path="wiki/",
+    )
+
+
+def test_server_scopes_qmd_retriever_to_project_name(tmp_path: Path):
+    _setup_project(tmp_path)
+
+    with patch("wikimind.server.make_retriever") as make_retriever:
+        make_retriever.return_value.name = "bm25"
+        create_server(tmp_path)
+
+    assert make_retriever.call_args.kwargs["index_name"] == "Test Wiki"
+    assert make_retriever.call_args.kwargs["collection_name"] == "Test Wiki"
 
 
 def test_server_rejects_path_traversal(tmp_path: Path):

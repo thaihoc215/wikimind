@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from typer.testing import CliRunner
 
 from wikimind import cli as cli_module
-from wikimind.cli import _update_claude_md, _WIKIMIND_START, _WIKIMIND_END
+from wikimind.cli import (
+    _default_wikimind_section,
+    _update_claude_md,
+    _WIKIMIND_START,
+    _WIKIMIND_END,
+)
 from wikimind.operations.ingest import IngestResult
 
 
@@ -158,6 +164,45 @@ def test_init_with_markers_replaces_without_force(tmp_path: Path, monkeypatch):
     assert "entities/" not in content  # general content replaced
 
 
+def test_init_registers_qmd_collection_in_project_index(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli_module, "build_qmd_cmd", lambda qmd_bin: ["qmd"])
+
+    commands = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        return MagicMock(returncode=0, stderr="")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+
+    result = runner.invoke(cli_module.app, ["init", "--template", "code", "--name", "ph-bsl"])
+
+    assert result.exit_code == 0
+    assert ["qmd", "--index", "ph-bsl", "collection", "add", ".wiki/vault/", "--name", "ph-bsl"] in commands
+    assert ["qmd", "--index", "ph-bsl", "embed"] in commands
+
+
+def test_default_wikimind_section_makes_writes_explicit_opt_in():
+    content = _default_wikimind_section()
+
+    assert "Write to the wiki only on explicit user request." in content
+    assert "After answering questions or making discoveries" not in content
+    assert "save durable outputs" not in content
+
+
+def test_bundled_templates_make_writes_explicit_opt_in():
+    templates_dir = Path(cli_module.__file__).parent / "templates"
+    template_files = sorted(templates_dir.glob("*/CLAUDE.md"))
+
+    assert template_files
+    for template_file in template_files:
+        content = template_file.read_text(encoding="utf-8")
+        assert "Write to the wiki only on explicit user request." in content
+        assert "After answering questions or making discoveries" not in content
+        assert "save durable outputs" not in content
+
+
 class _DummyLLM:
     def token_summary(self):
         return {
@@ -230,6 +275,94 @@ def test_ingest_batch_returns_zero_when_all_files_succeed(tmp_path: Path, monkey
     assert result.exit_code == 0
     assert "2 succeeded" in result.output
     assert "0 failed" in result.output
+
+
+def test_ingest_refreshes_qmd_index_before_embeddings(tmp_path: Path, monkeypatch):
+    _write_minimal_project(tmp_path)
+    (tmp_path / "wikimind.toml").write_text(
+        (tmp_path / "wikimind.toml").read_text(encoding="utf-8")
+        + '\n[wiki]\nretrieval_backend = "qmd"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "raw" / "a.md").write_text("# a", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli_module, "_make_llm", lambda cfg: _DummyLLM())
+    monkeypatch.setattr(cli_module, "build_qmd_cmd", lambda qmd_bin: ["qmd"])
+
+    refresh_calls = []
+
+    def fake_refresh(qmd_cmd, root, **kwargs):
+        refresh_calls.append((qmd_cmd, root, kwargs))
+        return (object(), object())
+
+    monkeypatch.setattr(cli_module, "run_qmd_refresh", fake_refresh)
+
+    def _fake_ingest(
+        source_path, store, llm, retriever=None, dry_run=False, force=False
+    ):
+        return IngestResult(pages_created=1, pages_updated=0, summary="ok")
+
+    monkeypatch.setattr("wikimind.operations.ingest.ingest", _fake_ingest)
+
+    result = runner.invoke(cli_module.app, ["ingest", "raw/a.md"])
+
+    assert result.exit_code == 0
+    assert refresh_calls == [
+        (
+            ["qmd"],
+            tmp_path,
+            {
+                "capture_output": False,
+                "text": False,
+                "index_name": "CLI Test",
+                "collection_name": "CLI Test",
+                "collection_path": "wiki/",
+            },
+        )
+    ]
+
+
+def test_ingest_scopes_qmd_retriever_to_project_name(tmp_path: Path, monkeypatch):
+    _write_minimal_project(tmp_path)
+    (tmp_path / "wikimind.toml").write_text(
+        (tmp_path / "wikimind.toml").read_text(encoding="utf-8")
+        + '\n[wiki]\nretrieval_backend = "qmd"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "raw" / "a.md").write_text("# a", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli_module, "_make_llm", lambda cfg: _DummyLLM())
+    monkeypatch.setattr(cli_module, "build_qmd_cmd", lambda qmd_bin: None)
+
+    make_retriever_calls = []
+
+    class DummyRetriever:
+        name = "qmd"
+
+        def retrieve(self, query, top_k):
+            return {}
+
+    def fake_make_retriever(*args, **kwargs):
+        make_retriever_calls.append(kwargs)
+        return DummyRetriever()
+
+    monkeypatch.setattr("wikimind.retrieval.make_retriever", fake_make_retriever)
+
+    def _fake_ingest(
+        source_path, store, llm, retriever=None, dry_run=False, force=False
+    ):
+        assert retriever is not None
+        return IngestResult(pages_created=1, pages_updated=0, summary="ok")
+
+    monkeypatch.setattr("wikimind.operations.ingest.ingest", _fake_ingest)
+
+    result = runner.invoke(cli_module.app, ["ingest", "raw/a.md"])
+
+    assert result.exit_code == 0
+    assert make_retriever_calls[0]["index_name"] == "CLI Test"
+    assert make_retriever_calls[0]["collection_name"] == "CLI Test"
 
 
 # ── generate command tests ────────────────────────────────────────────────────
@@ -310,6 +443,98 @@ def test_generate_vscode_updates_existing_mcp_json(tmp_path: Path, monkeypatch):
     config = json.loads(mcp_path.read_text())
     assert "wikimind" in config["servers"]
     assert "other-tool" in config["servers"]  # existing entry preserved
+
+
+def test_generate_codex_creates_project_local_config_toml(tmp_path: Path, monkeypatch):
+    import json
+    import tomllib
+
+    monkeypatch.chdir(tmp_path)
+    ignored_codex_home = tmp_path / "ignored-codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(ignored_codex_home))
+
+    (tmp_path / "CLAUDE.md").write_text(
+        f"{_WIKIMIND_START}\n# WikiMind\ncodex instructions\n{_WIKIMIND_END}\n",
+        encoding="utf-8",
+    )
+    fake_exe = tmp_path / "fake_wikimind.exe"
+    fake_exe.write_text("", encoding="utf-8")
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "wikimind": {
+                        "command": str(fake_exe),
+                        "args": ["serve"],
+                        "cwd": str(tmp_path),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.app, ["generate", "--tool", "codex"])
+
+    assert result.exit_code == 0
+    assert not (tmp_path / "AGENTS.md").exists()
+
+    assert not (ignored_codex_home / "config.toml").exists()
+    config_path = tmp_path / ".codex" / "config.toml"
+    assert config_path.exists()
+    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    server = config["mcp_servers"]["wikimind"]
+    assert server["command"] == str(fake_exe)
+    assert server["args"] == ["serve"]
+    assert server["cwd"] == str(tmp_path)
+    assert server["startup_timeout_sec"] == 20
+    assert server["tool_timeout_sec"] == 120
+
+
+def test_generate_codex_updates_existing_config_toml(tmp_path: Path, monkeypatch):
+    import tomllib
+
+    monkeypatch.chdir(tmp_path)
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+
+    (tmp_path / "CLAUDE.md").write_text(
+        f"{_WIKIMIND_START}\n# WikiMind\ncontent\n{_WIKIMIND_END}\n",
+        encoding="utf-8",
+    )
+    config_path = codex_dir / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "model = 'gpt-5-codex'",
+                "",
+                "[mcp_servers.other]",
+                "command = 'other'",
+                'args = ["run"]',
+                "",
+                "[mcp_servers.wikimind]",
+                "command = 'old-wikimind'",
+                'args = ["old"]',
+                "cwd = 'old-project'",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.app, ["generate", "--tool", "codex"])
+
+    assert result.exit_code == 0
+    content = config_path.read_text(encoding="utf-8")
+    assert content.count("[mcp_servers.wikimind]") == 1
+    assert "old-wikimind" not in content
+
+    config = tomllib.loads(content)
+    assert config["model"] == "gpt-5-codex"
+    assert config["mcp_servers"]["other"]["command"] == "other"
+    server = config["mcp_servers"]["wikimind"]
+    assert server["args"] == ["serve"]
+    assert server["cwd"] == str(tmp_path)
 
 
 def test_generate_unknown_tool_exits_nonzero(tmp_path: Path, monkeypatch):

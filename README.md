@@ -32,7 +32,7 @@ Three layers:
 
 | Mode | How | API key? |
 |------|-----|----------|
-| **A — MCP (any AI assistant)** | Your AI client reads the schema file and uses WikiMind MCP tools (`wiki_read_page`, `wiki_write_page`, etc.) to maintain the wiki as part of its normal work. Works with Claude Code, GitHub Copilot, Cursor, OpenCode, and any MCP-compatible client. | Not needed for Claude Code; depends on client for others |
+| **A — MCP (any AI assistant)** | Your AI client reads the schema file and uses WikiMind MCP tools (`wiki_read_page`, `wiki_search`, etc.) for context. It writes to the wiki only when you explicitly request a save/update/ingest action. Works with Claude Code, GitHub Copilot, Cursor, OpenCode, and any MCP-compatible client. | Not needed for Claude Code; depends on client for others |
 | **B — CLI standalone** | Run `wikimind ingest/query/lint` directly. WikiMind calls your configured LLM provider. | Depends on provider |
 
 Both modes write to the same wiki directory and are fully compatible.
@@ -158,6 +158,7 @@ wikimind init --template research      # general (default) | code | research | b
 Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`.
 
 - `CLAUDE.md` — schema/instructions for Claude Code. For other AI tools, copy or generate:
+  - Codex: `wikimind generate --tool codex` (creates/updates `.codex/config.toml`)
   - GitHub Copilot: `cp CLAUDE.md .github/copilot-instructions.md` (macOS/Linux) or `Copy-Item CLAUDE.md .github\copilot-instructions.md` (Windows)
   - OpenCode: `wikimind generate --tool opencode` (creates `AGENTS.md` + `opencode.json`, all platforms)
   - Cursor: `cp CLAUDE.md .cursorrules` (macOS/Linux) or `Copy-Item CLAUDE.md .cursorrules` (Windows)
@@ -168,11 +169,29 @@ Creates: `.wiki/raw/`, `.wiki/vault/`, `CLAUDE.md`, `wikimind.toml`, `.mcp.json`
 ### `wikimind generate`
 
 ```bash
+wikimind generate --tool codex      # Creates/updates .codex/config.toml
 wikimind generate --tool vscode     # Creates/updates .vscode/mcp.json + .github/copilot-instructions.md
 wikimind generate --tool opencode   # Creates/updates AGENTS.md + opencode.json for OpenCode
 ```
 
 Automates setup for specific AI clients by generating their required configuration files and injecting the WikiMind instructions.
+
+**`--tool codex`** writes one file:
+
+| File | Action |
+|------|--------|
+| `.codex/config.toml` | Created if absent; `[mcp_servers.wikimind]` added/updated if present |
+
+The generated Codex MCP entry follows this shape:
+
+```toml
+[mcp_servers.wikimind]
+command = 'C:\path\to\wikimind.exe'
+args = ["serve"]
+cwd = 'C:\path\to\project'
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+```
 
 **`--tool vscode`** writes two files:
 
@@ -368,6 +387,31 @@ macOS / Linux:
 
 ---
 
+### Codex
+
+Run a single command from the project root:
+
+```bash
+wikimind generate --tool codex
+```
+
+This creates or updates **`.codex/config.toml`**, the project-local MCP server config.
+
+The executable path is taken from `.mcp.json` if `wikimind init` was already run, so you never need to hard-code it.
+
+Manual equivalent:
+
+```toml
+[mcp_servers.wikimind]
+command = 'C:\path\to\wikimind.exe'
+args = ["serve"]
+cwd = 'C:\path\to\project'
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+```
+
+---
+
 ### GitHub Copilot (VS Code)
 
 Run a single command — it generates both files:
@@ -524,7 +568,7 @@ Point your client at `http://localhost:8000/sse`.
 
 > **Schema file tip:** The generated `CLAUDE.md` contains the wiki structure, page
 > format, and workflow instructions. Whichever file your AI tool reads (see table above),
-> make sure it has this content — that's what makes the AI maintain the wiki correctly.
+> make sure it has this content — that's what makes the AI use the wiki correctly.
 
 ---
 
@@ -659,7 +703,7 @@ what makes the wiki valuable — not re-derived on every query.
 ## Tips
 
 - **Browse in Obsidian** — open `.wiki/vault/` as an Obsidian vault. Graph view, clickable wikilinks, visible orphans.
-- **Save good answers** — `wikimind query --save "..."` files the answer back as a wiki page. Don't let syntheses disappear into terminal history.
+- **Save intentionally** — use `wikimind query --save "..."` or ask your AI client to save when you want an answer filed back as a wiki page.
 - **git init the wiki** — the wiki is just markdown. `git diff` shows what changed, `git checkout` reverts it.
 - **`--dry-run` before trusting a new source** — preview what the LLM would write without committing.
 - **Run lint periodically** — `wikimind lint --fix` handles mechanical fixes as the wiki grows.
@@ -715,7 +759,7 @@ scripts/               # Build scripts (bash + PowerShell)
 |---------|--------|
 | `ingest`, `query`, `lint`, `serve`, `watch`, `cost`, `status` | Done |
 | `init` — templates: general, code, research, book | Done |
-| MCP server — works with Claude Code, GitHub Copilot, Cursor, OpenCode | Done |
+| MCP server — works with Claude Code, Codex, GitHub Copilot, Cursor, OpenCode | Done |
 | Retrieval backends: `bm25`, `index_keyword`, `qmd` | Done |
 | `qmd` hybrid/semantic search backend (vector + LLM re-ranking, fully local) | Done |
 | MCP `wiki_search` uses configured retrieval backend | Done |

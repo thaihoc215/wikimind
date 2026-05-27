@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from rich.table import Table
 
 from wikimind.config import ConfigError, load_config
 from wikimind.llm import LLMClient, LLMError
+from wikimind.retrieval import build_qmd_cmd, run_qmd_refresh
 from wikimind.wiki import WikiStore
 
 app = typer.Typer(
@@ -84,7 +86,8 @@ def init(
     force: bool = typer.Option(
         False,
         "--force",
-        help="Replace the WikiMind section in CLAUDE.md with the new template. "
+        help="Replace the WikiMind section in CLAUDE.md with the new template, "
+        "and re-register the qmd collection from scratch. "
         "Your own content outside the <!-- wikimind:start/end --> markers is never touched.",
     ),
 ):
@@ -117,6 +120,8 @@ def init(
         if template_config_path.exists():
             source_toml = render(template_config_path.read_text(encoding="utf-8"))
 
+    retrieval_backend = "bm25"
+    qmd_bin_cfg = "qmd"
     template_categories: list[str] = []
     if source_toml:
         try:
@@ -124,6 +129,9 @@ def init(
             paths_cfg = parsed.get("paths", {})
             raw_rel_str = str(paths_cfg.get("raw", raw_rel_str))
             wiki_rel_str = str(paths_cfg.get("wiki", wiki_rel_str))
+            wiki_cfg = parsed.get("wiki", {})
+            retrieval_backend = wiki_cfg.get("retrieval_backend", "bm25")
+            qmd_bin_cfg = wiki_cfg.get("qmd_bin", "qmd")
         except tomllib.TOMLDecodeError:
             console.print(
                 "[yellow]Warning:[/yellow] Could not parse paths from wikimind.toml; "
@@ -277,6 +285,64 @@ def init(
         else:
             console.print(f"  [dim]Skipped[/dim]  .github/copilot-instructions.md (does not exist)")
 
+    # qmd collection registration + initial embed
+    if retrieval_backend == "qmd":
+        qmd_bin = qmd_bin_cfg or "qmd"
+        qmd_cmd = build_qmd_cmd(qmd_bin)
+        if qmd_cmd:
+            try:
+                if force:
+                    subprocess.run(
+                        qmd_cmd + ["--index", project_name, "collection", "remove", project_name],
+                        cwd=str(root),
+                        capture_output=True,
+                        timeout=30,
+                        check=False,
+                    )
+                # Pass the raw configured path (e.g. ".wiki/vault/") rather than
+                # the Python-resolved absolute path. Python's Path.resolve() follows
+                # symlinks, but qmd invoked via cmd /c cannot traverse the resolved
+                # symlink target. Passing the pre-resolution path lets qmd's Node.js
+                # follow symlinks itself (which works). Forward slashes are safe on
+                # all platforms for Node.js path handling.
+                qmd_wiki_path = wiki_rel_str.replace("\\", "/")
+                qmd_project_cmd = qmd_cmd + ["--index", project_name]
+                add_result = subprocess.run(
+                    qmd_project_cmd + ["collection", "add", qmd_wiki_path, "--name", project_name],
+                    cwd=str(root),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+                if add_result.returncode == 0:
+                    console.print(f"  [green]Registered[/green] qmd collection '{project_name}'")
+                    embed_result = subprocess.run(
+                        qmd_project_cmd + ["embed"],
+                        cwd=str(root),
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                        check=False,
+                    )
+                    if embed_result.returncode == 0:
+                        console.print("  [green]Initialized[/green] qmd embeddings")
+                    else:
+                        console.print(
+                            f"  [yellow]Warning:[/yellow] qmd embed failed: {embed_result.stderr.strip()[:200]}"
+                        )
+                else:
+                    console.print(
+                        f"  [yellow]Warning:[/yellow] qmd collection add failed: {add_result.stderr.strip()[:200]}"
+                    )
+                    console.print("  [dim]Tip:[/dim] re-run with --force to remove and re-register")
+            except Exception as exc:
+                console.print(f"  [yellow]Warning:[/yellow] qmd setup failed: {exc}")
+        else:
+            console.print(
+                f"  [dim]Skipped[/dim]  qmd setup (qmd not found — run: npm install -g @tobilu/qmd)"
+            )
+
     console.print()
     console.print(
         Panel(
@@ -324,8 +390,8 @@ def _resolve_wikimind_exe(root: Path) -> str:
     return "wikimind"
 
 
-def _generate_opencode(root: Path) -> None:
-    """Generate AGENTS.md and opencode.json for OpenCode integration."""
+def _generate_agents_md(root: Path) -> None:
+    """Create or update AGENTS.md from CLAUDE.md."""
     claude_md = root / "CLAUDE.md"
     agents_md = root / "AGENTS.md"
 
@@ -357,6 +423,11 @@ def _generate_opencode(root: Path) -> None:
         console.print(
             "  [green]Updated[/green]   AGENTS.md (WikiMind section replaced)"
         )
+
+
+def _generate_opencode(root: Path) -> None:
+    """Generate AGENTS.md and opencode.json for OpenCode integration."""
+    _generate_agents_md(root)
 
     # Create or update opencode.json with the wikimind MCP entry
     _generate_opencode_json(root)
@@ -402,6 +473,79 @@ def _generate_opencode_json(root: Path) -> None:
         }
         opencode_json.write_text(json.dumps(config, indent=4), encoding="utf-8")
         console.print("  [green]Created[/green]   opencode.json")
+
+
+_CODEX_WIKIMIND_TABLE_RE = re.compile(
+    r"(?ms)^\[mcp_servers\.wikimind\]\s*\n.*?(?=^\[|\Z)"
+)
+
+
+def _codex_config_path(root: Path) -> Path:
+    """Return the project-local Codex config.toml path."""
+    return root / ".codex" / "config.toml"
+
+
+def _toml_literal(value: str) -> str:
+    """Format a string as a TOML literal, preferring single quotes for paths."""
+    if "\n" in value or "\r" in value or "'" in value:
+        return json.dumps(value)
+    return f"'{value}'"
+
+
+def _codex_wikimind_table(root: Path) -> str:
+    exe = _resolve_wikimind_exe(root)
+    return "\n".join(
+        [
+            "[mcp_servers.wikimind]",
+            f"command = {_toml_literal(exe)}",
+            'args = ["serve"]',
+            f"cwd = {_toml_literal(str(root))}",
+            "startup_timeout_sec = 20",
+            "tool_timeout_sec = 120",
+        ]
+    )
+
+
+def _generate_codex_config(root: Path) -> None:
+    """Create or update Codex config.toml with the wikimind MCP server entry."""
+    config_path = _codex_config_path(root)
+    table = _codex_wikimind_table(root)
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.exists():
+        existing = config_path.read_text(encoding="utf-8")
+        try:
+            tomllib.loads(existing)
+        except tomllib.TOMLDecodeError:
+            console.print(
+                "[yellow]Warning:[/yellow] Codex config.toml is not valid TOML - overwriting."
+            )
+            existing = ""
+
+        if _CODEX_WIKIMIND_TABLE_RE.search(existing):
+            action = "Updated"
+            content = _CODEX_WIKIMIND_TABLE_RE.sub(lambda _: table + "\n", existing)
+            config_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+        else:
+            action = "Added"
+            content = existing.rstrip()
+            if content:
+                content += "\n\n"
+            content += table + "\n"
+            config_path.write_text(content, encoding="utf-8")
+
+        console.print(
+            f"  [green]{action}[/green]    {config_path} (wikimind MCP server)"
+        )
+    else:
+        config_path.write_text(table + "\n", encoding="utf-8")
+        console.print(f"  [green]Created[/green]   {config_path}")
+
+
+def _generate_codex(root: Path) -> None:
+    """Generate project-local .codex/config.toml for Codex integration."""
+    _generate_codex_config(root)
 
 
 def _generate_vscode(root: Path) -> None:
@@ -516,10 +660,10 @@ Follow this default order (wiki-first):
 1. **Before deep-diving into source files or broad code search**, use `wiki_search` first.
 2. **If relevant wiki pages exist**, read them with `wiki_read_page` and answer from wiki context.
 3. **Only read raw/source files when needed** (wiki is missing details, outdated, or exact code is required).
-4. **After answering questions or making discoveries**, save durable outputs with
-   `wikimind query --save "your question"` (or write an analysis page via MCP tools).
+4. **Write to the wiki only on explicit user request.** Do not save answers,
+   discoveries, analyses, or code-change notes unless the user asks.
 5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
-6. **After significant code/source changes**, update affected wiki pages (`wiki_write_page`),
+6. **When explicitly asked to save or update wiki content**, update affected pages (`wiki_write_page`),
    update index if needed (`wiki_update_index`), and append log (`wiki_append_log`).
    Log entry must be a single bullet line: `- [YYYY-MM-DD] action | one-line summary`
 7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
@@ -563,23 +707,28 @@ def generate(
     tool: str = typer.Option(
         ...,
         "--tool",
-        help="Tool to generate config for: opencode | vscode",
+        help="Tool to generate config for: codex | opencode | vscode",
     ),
 ):
     """Generate tool-specific configuration files for WikiMind integration.
 
     \b
+    --tool codex      Create/update .codex/config.toml
     --tool opencode   Create/update AGENTS.md + opencode.json (MCP config for OpenCode)
     --tool vscode     Create/update .vscode/mcp.json for VSCode Copilot MCP
     """
     root = Path.cwd()
 
-    if tool == "opencode":
+    if tool == "codex":
+        _generate_codex(root)
+    elif tool == "opencode":
         _generate_opencode(root)
     elif tool == "vscode":
         _generate_vscode(root)
     else:
-        console.print(f"[red]Unknown tool:[/red] '{tool}'. Available: opencode, vscode")
+        console.print(
+            f"[red]Unknown tool:[/red] '{tool}'. Available: codex, opencode, vscode"
+        )
         raise typer.Exit(1)
 
 
@@ -607,6 +756,8 @@ def ingest(
             backend=cfg.wiki.retrieval_backend,
             wiki_config=cfg.wiki,
             root=cfg.root,
+            index_name=cfg.project.name,
+            collection_name=cfg.project.name,
         )
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
@@ -652,7 +803,7 @@ def ingest(
                 )
             else:
                 console.print(
-                    f"  [green]✓[/green] {result.summary} "
+                    f"  [green]OK[/green] {result.summary} "
                     f"(+{result.pages_created} pages, ~{result.pages_updated} updated)"
                 )
         except LLMError as e:
@@ -671,23 +822,35 @@ def ingest(
     _print_cost(llm, command="ingest", cfg=cfg)
 
     if cfg.wiki.retrieval_backend == "qmd" and not dry_run:
-        qmd_bin = cfg.wiki.qmd_bin or "qmd"
-        if shutil.which(qmd_bin):
-            console.print("[dim]Refreshing qmd embeddings...[/dim]")
+        qmd_cmd = build_qmd_cmd(cfg.wiki.qmd_bin or "qmd")
+        if qmd_cmd:
+            console.print("[dim]Refreshing qmd index and embeddings...[/dim]")
             try:
-                subprocess.run(
-                    [qmd_bin, "embed"],
-                    cwd=str(cfg.root),
-                    timeout=120,
-                    check=False,
+                update_result, embed_result = run_qmd_refresh(
+                    qmd_cmd,
+                    cfg.root,
+                    capture_output=False,
+                    text=False,
+                    index_name=cfg.project.name,
+                    collection_name=cfg.project.name,
+                    collection_path=cfg.paths.wiki.replace("\\", "/"),
                 )
-                console.print("[green]qmd embeddings refreshed.[/green]")
+                if update_result.returncode != 0:
+                    console.print(
+                        f"[yellow]Warning: qmd update failed with exit code {update_result.returncode}.[/yellow]"
+                    )
+                elif embed_result is not None and embed_result.returncode != 0:
+                    console.print(
+                        f"[yellow]Warning: qmd embed failed with exit code {embed_result.returncode}.[/yellow]"
+                    )
+                else:
+                    console.print("[green]qmd index and embeddings refreshed.[/green]")
             except subprocess.TimeoutExpired:
                 console.print(
-                    "[yellow]Warning: qmd embed timed out after 120s.[/yellow]"
+                    "[yellow]Warning: qmd refresh timed out after 120s.[/yellow]"
                 )
             except Exception as e:
-                console.print(f"[yellow]Warning: qmd embed failed: {e}[/yellow]")
+                console.print(f"[yellow]Warning: qmd refresh failed: {e}[/yellow]")
 
     if failed > 0:
         raise typer.Exit(1)
@@ -717,6 +880,8 @@ def query(
             backend=cfg.wiki.retrieval_backend,
             wiki_config=cfg.wiki,
             root=cfg.root,
+            index_name=cfg.project.name,
+            collection_name=cfg.project.name,
         )
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
@@ -796,13 +961,13 @@ def lint(
     if not report.has_issues:
         if semantic:
             console.print(
-                "[green]✓ Wiki is healthy — no structural or semantic issues found.[/green]"
+                "[green]OK — no structural or semantic issues found.[/green]"
             )
             if llm is not None:
                 _print_cost(llm)
         else:
             console.print(
-                "[green]✓ Wiki is healthy — no structural issues found.[/green]"
+                "[green]OK — no structural issues found.[/green]"
             )
         return
 
@@ -871,7 +1036,7 @@ def lint(
     if fix:
         console.print()
         fixed = _fix(report, store)
-        console.print(f"[green]✓ Applied {fixed} auto-fix(es).[/green]")
+        console.print(f"[green]OK Applied {fixed} auto-fix(es).[/green]")
         if semantic:
             console.print(
                 "[dim]Note: semantic findings are report-only (no auto-fix yet).[/dim]"
@@ -987,6 +1152,8 @@ def watch(
             backend=cfg.wiki.retrieval_backend,
             wiki_config=cfg.wiki,
             root=cfg.root,
+            index_name=cfg.project.name,
+            collection_name=cfg.project.name,
         )
     except RetrievalError as e:
         console.print(f"[red]Retrieval config error:[/red] {e}")
@@ -1021,7 +1188,7 @@ def watch(
                         result = _ingest(
                             f, store, llm, retriever=retriever, force=force
                         )
-                        console.print(f"    [green]✓[/green] {result.summary}")
+                        console.print(f"    [green]OK[/green] {result.summary}")
                     except LLMError as e:
                         console.print(f"    [red]LLM error:[/red] {e}")
                     except Exception as e:

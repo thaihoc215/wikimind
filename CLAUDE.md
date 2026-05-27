@@ -136,9 +136,12 @@ This project uses a persistent wiki in `.wiki/vault/` maintained by LLMs.
 - `.wiki/vault/log.md` — Chronological record of all wiki changes.
 - `.wiki/vault/overview.md` — High-level codebase overview.
 - `.wiki/vault/modules/` — Source files, classes, functions, components.
-- `.wiki/vault/apis/` — Endpoints, interfaces, contracts, schemas.
+- `.wiki/vault/apis/` — API documentation overview: endpoints, request/response shapes, examples, summaries.
+- `.wiki/vault/apis/api-detail/` — API detail: business flow overview, business logic deep-dives, API layer internals.
 - `.wiki/vault/patterns/` — Design patterns, architectural decisions, conventions.
 - `.wiki/vault/decisions/` — Architecture Decision Records (ADRs).
+- `.wiki/vault/diagrams/` — All diagrams: Mermaid, UML, PlantUML, draw.io, etc.
+- `.wiki/vault/diagrams/apis/` — Diagrams specific to API flows and contracts.
 - `.wiki/vault/sources/` — One summary page per raw source in `.wiki/raw/`.
 - `.wiki/vault/analyses/` — Saved query answers, comparisons, syntheses.
 - `.wiki/raw/` — Raw source documents. **Immutable — never modify these.**
@@ -150,10 +153,10 @@ Follow this default order (wiki-first):
 1. **Before deep-diving into source files or broad code search**, use `wiki_search` first.
 2. **If relevant wiki pages exist**, read them with `wiki_read_page` and answer from wiki context.
 3. **Only read raw/source files when needed** (wiki is missing details, outdated, or exact code is required).
-4. **After answering questions or making discoveries**, save durable outputs with
-   `wikimind query --save "your question"` (or write an analysis page via MCP tools).
+4. **Write to the wiki only on explicit user request.** Do not save answers,
+   discoveries, analyses, or code-change notes unless the user asks.
 5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
-6. **After significant code/source changes**, update affected wiki pages (`wiki_write_page`),
+6. **When explicitly asked to save or update wiki content**, update affected pages (`wiki_write_page`),
    update index if needed (`wiki_update_index`), and append log (`wiki_append_log`).
    Log entry must be a single bullet line: `- [YYYY-MM-DD] action | one-line summary`
 7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).

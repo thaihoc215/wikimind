@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -26,7 +25,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from wikimind.config import ConfigError, load_config
-from wikimind.retrieval import make_retriever
+from wikimind.retrieval import build_qmd_cmd, make_retriever, run_qmd_refresh
 from wikimind.wiki import WikiStore
 
 
@@ -52,7 +51,14 @@ def create_server(root: Path | None = None) -> FastMCP:
     logger = _setup_logger(log_path)
 
     store = WikiStore(cfg.wiki_path, cfg.raw_path)
-    retriever = make_retriever(store, backend=cfg.wiki.retrieval_backend, wiki_config=cfg.wiki, root=cfg.root)
+    retriever = make_retriever(
+        store,
+        backend=cfg.wiki.retrieval_backend,
+        wiki_config=cfg.wiki,
+        root=cfg.root,
+        index_name=cfg.project.name,
+        collection_name=cfg.project.name,
+    )
     logger.info("server started | backend=%s qmd_mode=%s wiki=%s", cfg.wiki.retrieval_backend, cfg.wiki.qmd_mode, cfg.wiki_path)
 
     # ── qmd background embed state ────────────────────────────────────────
@@ -74,21 +80,23 @@ def create_server(root: Path | None = None) -> FastMCP:
         """Background worker: runs qmd embed then clears state."""
         with _embed_lock:
             _embed_dirty[0] = False  # clear BEFORE subprocess so mid-embed writes re-set it
-        qmd_bin = cfg.wiki.qmd_bin or "qmd"
-        if shutil.which(qmd_bin):
+        qmd_cmd = build_qmd_cmd(cfg.wiki.qmd_bin or "qmd")
+        if qmd_cmd:
             logger.info("embed | start")
             try:
-                result = subprocess.run(
-                    [qmd_bin, "embed"],
-                    stdin=subprocess.DEVNULL,
+                update_result, embed_result = run_qmd_refresh(
+                    qmd_cmd,
+                    cfg.root,
                     capture_output=True,
                     text=True,
-                    cwd=str(cfg.root),
-                    timeout=120,
-                    check=False,
+                    index_name=cfg.project.name,
+                    collection_name=cfg.project.name,
+                    collection_path=cfg.paths.wiki.replace("\\", "/"),
                 )
-                if result.returncode != 0:
-                    logger.warning("embed | exit_code=%d stderr=%r", result.returncode, result.stderr[:200])
+                if update_result.returncode != 0:
+                    logger.warning("update | exit_code=%d stderr=%r", update_result.returncode, update_result.stderr[:200])
+                elif embed_result is not None and embed_result.returncode != 0:
+                    logger.warning("embed | exit_code=%d stderr=%r", embed_result.returncode, embed_result.stderr[:200])
                 else:
                     logger.info("embed | done")
             except subprocess.TimeoutExpired:
@@ -120,8 +128,8 @@ def create_server(root: Path | None = None) -> FastMCP:
         "wikimind",
         instructions=(
             "WikiMind wiki tools. Read wiki/index.md first to understand what "
-            "pages exist, then read specific pages for details. Use write tools "
-            "to update the wiki after analysis or discoveries."
+            "pages exist, then read specific pages for details. Write to the "
+            "wiki only on explicit user request."
         ),
     )
 
