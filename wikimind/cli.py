@@ -395,21 +395,16 @@ def _generate_agents_md(root: Path) -> None:
     claude_md = root / "CLAUDE.md"
     agents_md = root / "AGENTS.md"
 
-    if not claude_md.exists():
-        console.print(
-            "[red]CLAUDE.md not found.[/red] Run 'wikimind init' first to create it."
-        )
-        raise typer.Exit(1)
+    if not agents_md.exists():
+        if claude_md.exists():
+            shutil.copy2(claude_md, agents_md)
+            console.print("  [green]Copied[/green]    CLAUDE.md -> AGENTS.md")
+        else:
+            agents_md.write_text(_default_wikimind_section(), encoding="utf-8")
+            console.print("  [green]Created[/green]   AGENTS.md")
+        return
 
-    content = claude_md.read_text(encoding="utf-8")
-
-    # Extract only the wikimind section if markers are present; otherwise use full content
-    if _WIKIMIND_START in content and _WIKIMIND_END in content:
-        start = content.index(_WIKIMIND_START)
-        end = content.index(_WIKIMIND_END) + len(_WIKIMIND_END)
-        wikimind_section = content[start:end]
-    else:
-        wikimind_section = content.strip()
+    wikimind_section = _get_wikimind_section_from_claude(claude_md)
 
     # Create or update AGENTS.md — always replace wikimind section (force=True)
     status = _update_claude_md(agents_md, wikimind_section, force=True)

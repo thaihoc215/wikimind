@@ -374,16 +374,14 @@ def test_generate_opencode_creates_agents_md_from_claude_md(
     monkeypatch.chdir(tmp_path)
     claude = tmp_path / "CLAUDE.md"
     claude.write_text(
-        f"{_WIKIMIND_START}\n# WikiMind\nsome instructions\n{_WIKIMIND_END}\n",
+        f"# Project instructions\n\ncustom preface\n\n{_WIKIMIND_START}\n# WikiMind\nsome instructions\n{_WIKIMIND_END}\n",
         encoding="utf-8",
     )
     result = runner.invoke(cli_module.app, ["generate", "--tool", "opencode"])
     assert result.exit_code == 0
     agents = tmp_path / "AGENTS.md"
     assert agents.exists()
-    content = agents.read_text()
-    assert "WikiMind" in content
-    assert "some instructions" in content
+    assert agents.read_text(encoding="utf-8") == claude.read_text(encoding="utf-8")
 
 
 def test_generate_opencode_updates_existing_agents_md(tmp_path: Path, monkeypatch):
@@ -405,10 +403,38 @@ def test_generate_opencode_updates_existing_agents_md(tmp_path: Path, monkeypatc
     assert "My own notes" in content  # custom content preserved
 
 
-def test_generate_opencode_fails_without_claude_md(tmp_path: Path, monkeypatch):
+def test_generate_opencode_updates_existing_agents_md_without_claude_md(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text(
+        f"# My own notes\n\n{_WIKIMIND_START}\n# WikiMind\nold content\n{_WIKIMIND_END}\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(cli_module.app, ["generate", "--tool", "opencode"])
+
+    assert result.exit_code == 0
+    content = agents.read_text(encoding="utf-8")
+    assert "My own notes" in content
+    assert "# WikiMind Knowledge Base" in content
+    assert "old content" not in content
+    assert (tmp_path / "opencode.json").exists()
+
+
+def test_generate_opencode_creates_agents_md_without_claude_md(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(cli_module.app, ["generate", "--tool", "opencode"])
-    assert result.exit_code != 0
+    assert result.exit_code == 0
+    agents = tmp_path / "AGENTS.md"
+    assert agents.exists()
+    content = agents.read_text(encoding="utf-8")
+    assert _WIKIMIND_START in content
+    assert "# WikiMind Knowledge Base" in content
+    assert (tmp_path / "opencode.json").exists()
 
 
 def test_generate_vscode_creates_mcp_json(tmp_path: Path, monkeypatch):
