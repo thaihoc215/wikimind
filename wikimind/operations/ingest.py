@@ -98,11 +98,6 @@ def ingest(
         entries_to_remove=result.index_entries_to_remove,
     )
 
-    # Append to log
-    log_entry = result.log_entry
-    if log_entry:
-        store.append_log(log_entry)
-
     # Mark as ingested
     store.mark_ingested(source_path)
 

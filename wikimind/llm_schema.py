@@ -76,7 +76,6 @@ class IngestToolOutput:
     files_to_write: list[IngestFileWrite]
     index_entries_to_add: list[str]
     index_entries_to_remove: list[str]
-    log_entry: str
     summary: str
 
 
@@ -107,14 +106,12 @@ def parse_ingest_tool_output(data: Any) -> IngestToolOutput:
     index_entries_to_remove = _optional_list_str(
         payload.get("index_entries_to_remove"), "index_entries_to_remove"
     )
-    log_entry = _require_str(payload.get("log_entry"), "log_entry")
     summary = _require_str(payload.get("summary"), "summary")
 
     return IngestToolOutput(
         files_to_write=files_to_write,
         index_entries_to_add=index_entries_to_add,
         index_entries_to_remove=index_entries_to_remove,
-        log_entry=log_entry,
         summary=summary,
     )
 

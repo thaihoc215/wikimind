@@ -151,6 +151,5 @@ sources: []
         entries_to_add=[f"- [[{slug}]] — {question[:80]}"],
         entries_to_remove=[],
     )
-    store.append_log(f"- [{today}] query | {question[:60]} → {Path(page_path).name}")
 
     return page_path

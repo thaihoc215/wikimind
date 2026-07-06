@@ -58,13 +58,25 @@ pip install -e .
 pip install -e ".[pdf]"          # optional: adds PDF ingestion support
 ```
 
-The `wikimind` command works while the venv is active. To use it across all your
-projects without activating a venv every session, install via `pipx` instead:
+> **How the command becomes available globally:**
+> When you run `pip install -e .`, pip reads the `[project.scripts]` entry in
+> `pyproject.toml` and creates a `wikimind` executable in your Python
+> environment's `Scripts/` folder (e.g. `.venv/Scripts/wikimind.exe`). Because
+> that folder is added to your shell's **PATH** when the venv is active, the
+> terminal can find `wikimind` from any directory — not just the project root.
+
+The `wikimind` command works **while the venv is active**. To use it across all
+your projects without activating a venv every session, install via `pipx` instead:
 
 ```bash
 pip install pipx
-pipx install -e ~/path/to/wikimind   # permanent global CLI
+pipx install -e ~/path/to/wikimind   # permanent global CLI — run once, works everywhere
 ```
+
+> **`pipx install -e` only needs to be run once.** pipx creates its own isolated
+> environment and registers `wikimind` in your system PATH automatically —
+> no venv activation required. Future code edits in the project folder take
+> effect immediately thanks to editable mode (`-e`).
 
 ### From a wheel (distribute to other machines)
 

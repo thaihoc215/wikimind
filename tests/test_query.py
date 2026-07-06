@@ -69,11 +69,13 @@ def test_query_save_updates_index(tmp_wiki: WikiStore, mock_llm_query):
     assert "what-is-openai" in index or "openai" in index.lower()
 
 
-def test_query_save_appends_log(tmp_wiki: WikiStore, mock_llm_query):
+def test_query_save_does_not_append_log(tmp_wiki: WikiStore, mock_llm_query):
     _populate_wiki(tmp_wiki)
+    log_path = tmp_wiki.wiki_path / "log.md"
+    before = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
     query("What is OpenAI?", tmp_wiki, mock_llm_query, save=True)
-    log = (tmp_wiki.wiki_path / "log.md").read_text(encoding="utf-8")
-    assert "query" in log.lower()
+    after = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    assert after == before
 
 
 def test_query_no_save_no_page_written(tmp_wiki: WikiStore, mock_llm_query):

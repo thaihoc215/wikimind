@@ -30,10 +30,14 @@ def test_ingest_updates_index(
     assert "[[openai]]" in index
 
 
-def test_ingest_appends_log(tmp_wiki: WikiStore, sample_source: Path, mock_llm_ingest):
+def test_ingest_does_not_append_log(
+    tmp_wiki: WikiStore, sample_source: Path, mock_llm_ingest
+):
+    log_path = tmp_wiki.wiki_path / "log.md"
+    before = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
     ingest(sample_source, tmp_wiki, mock_llm_ingest)
-    log = (tmp_wiki.wiki_path / "log.md").read_text(encoding="utf-8")
-    assert "ingest" in log.lower()
+    after = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    assert after == before
 
 
 def test_ingest_marks_as_ingested(
@@ -86,7 +90,6 @@ def test_ingest_invalid_tool_output_raises_llm_error(
 ):
     mock_llm_ingest.call.return_value = {
         "files_to_write": [{"path": "sources/x.md", "content": "# missing action"}],
-        "log_entry": "## [2026-04-09] ingest | Broken",
         "summary": "broken",
     }
 

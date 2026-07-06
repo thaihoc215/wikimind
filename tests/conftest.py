@@ -86,7 +86,6 @@ def mock_llm_ingest(mocker):
             "- [[openai]] — AI research company",
         ],
         "index_entries_to_remove": [],
-        "log_entry": "## [2026-04-09] ingest | The Rise of Large Language Models\n\nCreated 2 pages.",
         "summary": "Ingested LLM article, created source + entity pages.",
     }
     mock.token_summary.return_value = {

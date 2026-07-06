@@ -32,7 +32,7 @@ INGEST_TOOL = {
     "description": "Write wiki pages based on the ingested source.",
     "input_schema": {
         "type": "object",
-        "required": ["files_to_write", "log_entry", "summary"],
+        "required": ["files_to_write", "summary"],
         "properties": {
             "files_to_write": {
                 "type": "array",
@@ -65,10 +65,6 @@ INGEST_TOOL = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Lines to remove from index.md (exact match)",
-            },
-            "log_entry": {
-                "type": "string",
-                "description": "Entry for log.md. Single bullet line. Format: - [YYYY-MM-DD] ingest | Title (N pages created/updated)",
             },
             "summary": {
                 "type": "string",

@@ -157,8 +157,7 @@ Follow this default order (wiki-first):
    discoveries, analyses, or code-change notes unless the user asks.
 5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
 6. **When explicitly asked to save or update wiki content**, update affected pages (`wiki_write_page`),
-   update index if needed (`wiki_update_index`), and append log (`wiki_append_log`).
-   Log entry must be a single bullet line: `- [YYYY-MM-DD] action | one-line summary`
+   and update the index if needed (`wiki_update_index`).
 7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
 8. If paths are customized in `wikimind.toml`, always follow configured paths.
 9. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
