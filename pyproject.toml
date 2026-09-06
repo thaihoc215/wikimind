@@ -28,6 +28,25 @@ wikimind = "wikimind.cli:app"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Declare the payload explicitly. Hatchling infers sdist contents from
+# .gitignore, but it does not read .git/info/exclude — which let 1,280 files
+# of .opencode/node_modules (4 MB of unrelated JS) into the 0.2.0 sdist.
+[tool.hatch.build.targets.wheel]
+packages = ["wikimind"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/wikimind",
+    "/tests",
+    "/docs",
+    "/scripts",
+    "/README.md",
+    "/CLAUDE.md",
+    "/CHEATSHEET.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
