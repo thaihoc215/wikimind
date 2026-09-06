@@ -11,9 +11,9 @@
 |---|---|---|---|
 | 1 | `index_keyword` | We built it (`retrieval.py`) | Done, available |
 | 2 | `bm25` | We built it (`retrieval.py`) | Done, **current default** |
-| 3 | `qmd search` | qmd CLI — BM25 mode | Not integrated |
-| 4 | `qmd vsearch` | qmd CLI — vector only | Not integrated |
-| 5 | `qmd query` | qmd CLI — full hybrid | Not integrated |
+| 3 | `qmd search` | qmd CLI — BM25 mode | Integrated (`qmd_mode = "search"`) — not recommended, see below |
+| 4 | `qmd vsearch` | qmd CLI — vector only | Integrated, **qmd default mode** |
+| 5 | `qmd query` | qmd CLI — full hybrid | Integrated (`qmd_mode = "query"`) |
 
 ---
 
@@ -255,10 +255,10 @@ Only these two qmd commands are worth wiring up:
 
 ```python
 # Option: vector only (faster, no re-ranking)
-subprocess.run(["qmd", "vsearch", query, "--json"])
+subprocess.run(["qmd", "vsearch", query, "--format", "json"])
 
 # Option: full hybrid (slower, best quality) — recommended
-subprocess.run(["qmd", "query", query, "--json"])
+subprocess.run(["qmd", "query", query, "--format", "json"])
 ```
 
 Both slot into `QmdRetriever.retrieve()` — the only difference is the subcommand name.

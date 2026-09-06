@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from wikimind.config import WikiConfig
-from wikimind.retrieval import BM25Retriever, QmdRetriever, RetrievalError, build_qmd_cmd, make_retriever, run_qmd_refresh
+from wikimind.retrieval import BM25Retriever, QmdRetriever, RetrievalError, build_qmd_cmd, make_retriever, run_qmd_doctor, run_qmd_refresh
 from wikimind.wiki import WikiStore
 
 
@@ -228,7 +228,7 @@ def test_qmd_retriever_modes(tmp_wiki: WikiStore, mode: str):
         assert cmd[0] == "qmd"
         assert cmd[1] == mode
         assert cmd[2] == "openai"
-        assert "--json" in cmd
+        assert cmd[3:5] == ["--format", "json"]
         assert "entities/openai.md" in pages
 
 
@@ -248,7 +248,7 @@ def test_qmd_retriever_scopes_search_to_collection(tmp_wiki: WikiStore):
         pages = retriever.retrieve("openai", top_k=5)
 
     cmd = mock_run.call_args.args[0]
-    assert cmd == ["qmd", "vsearch", "openai", "--json", "-c", "ph-bsl"]
+    assert cmd == ["qmd", "vsearch", "openai", "--format", "json", "-c", "ph-bsl"]
     assert "entities/openai.md" in pages
 
 
@@ -274,7 +274,9 @@ def test_qmd_retriever_scopes_search_to_index_and_collection(tmp_wiki: WikiStore
         pages = retriever.retrieve("openai", top_k=5)
 
     cmd = mock_run.call_args.args[0]
-    assert cmd == ["qmd", "--index", "ph-bsl", "vsearch", "openai", "--json", "-c", "ph-bsl"]
+    assert cmd == [
+        "qmd", "--index", "ph-bsl", "vsearch", "openai", "--format", "json", "-c", "ph-bsl"
+    ]
     assert "entities/openai.md" in pages
 
 
@@ -321,3 +323,148 @@ def test_qmd_retriever_top_k_respected(tmp_wiki: WikiStore):
          patch("wikimind.retrieval.subprocess.run", return_value=mock_result):
         pages = retriever.retrieve("test", top_k=2)
         assert len(pages) == 2
+
+
+# ── query-mode tuning flags ───────────────────────────────────────────────────
+
+
+def _stub_qmd_result() -> MagicMock:
+    result = MagicMock(returncode=0)
+    result.stdout = json.dumps(
+        [{"file": "qmd://proj/entities/openai.md", "score": 0.95}]
+    )
+    return result
+
+
+def test_qmd_query_mode_passes_rerank_tuning_flags(tmp_wiki: WikiStore):
+    """--no-rerank and -C are forwarded when qmd runs in hybrid query mode."""
+    (tmp_wiki.wiki_path / "entities").mkdir(exist_ok=True)
+    (tmp_wiki.wiki_path / "entities" / "openai.md").write_text("# OpenAI", encoding="utf-8")
+
+    retriever = QmdRetriever(
+        tmp_wiki, mode="query", qmd_bin="qmd", no_rerank=True, candidate_limit=20
+    )
+    with patch.object(QmdRetriever, "_build_cmd_prefix", return_value=["qmd"]),          patch("wikimind.retrieval.subprocess.run", return_value=_stub_qmd_result()) as mock_run:
+        retriever.retrieve("openai", top_k=5)
+
+    cmd = mock_run.call_args[0][0]
+    assert "--no-rerank" in cmd
+    assert cmd[cmd.index("-C") + 1] == "20"
+
+
+@pytest.mark.parametrize("mode", ["search", "vsearch"])
+def test_qmd_non_query_modes_omit_rerank_flags(tmp_wiki: WikiStore, mode: str):
+    """Reranking flags only apply to query mode; never send them elsewhere."""
+    (tmp_wiki.wiki_path / "entities").mkdir(exist_ok=True)
+    (tmp_wiki.wiki_path / "entities" / "openai.md").write_text("# OpenAI", encoding="utf-8")
+
+    retriever = QmdRetriever(
+        tmp_wiki, mode=mode, qmd_bin="qmd", no_rerank=True, candidate_limit=20
+    )
+    with patch.object(QmdRetriever, "_build_cmd_prefix", return_value=["qmd"]),          patch("wikimind.retrieval.subprocess.run", return_value=_stub_qmd_result()) as mock_run:
+        retriever.retrieve("openai", top_k=5)
+
+    cmd = mock_run.call_args[0][0]
+    assert "--no-rerank" not in cmd
+    assert "-C" not in cmd
+
+
+def test_make_retriever_forwards_qmd_tuning_config(tmp_wiki: WikiStore):
+    """WikiConfig tuning knobs reach the QmdRetriever."""
+    config = WikiConfig(
+        retrieval_backend="qmd",
+        qmd_mode="query",
+        qmd_bin="qmd",
+        qmd_no_rerank=True,
+        qmd_candidate_limit=15,
+    )
+    with patch("wikimind.retrieval.shutil.which", return_value="/usr/local/bin/qmd"):
+        retriever = make_retriever(tmp_wiki, backend="qmd", wiki_config=config)
+
+    assert isinstance(retriever, QmdRetriever)
+    assert retriever.no_rerank is True
+    assert retriever.candidate_limit == 15
+
+
+# ── run_qmd_doctor ────────────────────────────────────────────────────────────
+
+
+def test_run_qmd_doctor_uses_named_index(tmp_path: Path):
+    doctor_result = MagicMock(returncode=0, stdout="all good", stderr="")
+    with patch("wikimind.retrieval.subprocess.run", return_value=doctor_result) as mock_run:
+        assert run_qmd_doctor(["qmd"], tmp_path, index_name="proj") is doctor_result
+
+    assert mock_run.call_args[0][0] == ["qmd", "--index", "proj", "doctor"]
+
+
+def test_run_qmd_doctor_returns_none_on_old_qmd(tmp_path: Path):
+    """qmd < 2.5.0 has no doctor command — callers should skip silently."""
+    doctor_result = MagicMock(returncode=1, stdout="", stderr="Unknown command: doctor")
+    with patch("wikimind.retrieval.subprocess.run", return_value=doctor_result):
+        assert run_qmd_doctor(["qmd"], tmp_path) is None
+
+
+def test_run_qmd_doctor_reports_real_failures(tmp_path: Path):
+    """A genuine diagnostic failure is returned, not swallowed as 'too old'."""
+    doctor_result = MagicMock(returncode=1, stdout="embedding model not cached", stderr="")
+    with patch("wikimind.retrieval.subprocess.run", return_value=doctor_result) as _:
+        result = run_qmd_doctor(["qmd"], tmp_path)
+
+    assert result is not None
+    assert result.returncode == 1
+
+
+# ── file URI parsing ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("file_uri", "expected"),
+    [
+        # Plain form (qmd 2.1.0 and earlier).
+        ("qmd://wiki/analyses/foo.md", "analyses/foo.md"),
+        # qmd appends ?index=<name> when a named index is in use (2.8.3).
+        ("qmd://wiki/analyses/foo.md?index=wiki", "analyses/foo.md"),
+        ("qmd://proj/a/b/c.md?index=proj", "a/b/c.md"),
+        # Fragments too, for good measure.
+        ("qmd://wiki/analyses/foo.md#section", "analyses/foo.md"),
+        # Non-qmd paths pass through, minus any query string.
+        ("analyses/foo.md", "analyses/foo.md"),
+        ("analyses/foo.md?index=wiki", "analyses/foo.md"),
+    ],
+)
+def test_parse_file_uri_strips_scheme_and_query(
+    tmp_wiki: WikiStore, file_uri: str, expected: str
+):
+    """A ?index= suffix must never reach the filesystem lookup.
+
+    Regression: qmd 2.8.3 started appending ?index=<name>, which made every
+    result resolve to a non-existent path and get silently dropped.
+    """
+    retriever = QmdRetriever(tmp_wiki, mode="vsearch", qmd_bin="qmd")
+    assert retriever._parse_file_uri(file_uri) == expected
+
+
+def test_qmd_retriever_resolves_pages_from_indexed_uris(tmp_wiki: WikiStore):
+    """End-to-end parse: a 2.8.3-shaped payload still yields real page content."""
+    (tmp_wiki.wiki_path / "analyses").mkdir(exist_ok=True)
+    (tmp_wiki.wiki_path / "analyses" / "foo.md").write_text("# Foo", encoding="utf-8")
+
+    retriever = QmdRetriever(
+        tmp_wiki, mode="vsearch", qmd_bin="qmd", index_name="proj", collection_name="proj"
+    )
+    mock_result = MagicMock(returncode=0)
+    mock_result.stdout = json.dumps([
+        {
+            "docid": "#87f0ba",
+            "score": 0.69,
+            "file": "qmd://proj/analyses/foo.md?index=proj",
+            "line": 12,
+            "title": "Foo",
+            "snippet": "@@ -11,4 @@",
+        }
+    ])
+
+    with patch.object(QmdRetriever, "_build_cmd_prefix", return_value=["qmd"]),          patch("wikimind.retrieval.subprocess.run", return_value=mock_result):
+        pages = retriever.retrieve("foo", top_k=5)
+
+    assert pages == {"analyses/foo.md": "# Foo"}

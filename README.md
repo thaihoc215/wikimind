@@ -731,7 +731,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-82 tests across 9 test files. All tests use mocked LLM clients — no real API calls, no keys needed.
+169 tests across 10 test files. LLM calls are always mocked — no real API calls, no keys needed. `tests/test_qmd_integration.py` additionally exercises the real qmd CLI and skips when qmd is not installed.
 
 ### Project structure
 
@@ -748,7 +748,7 @@ wikimind/              # Main package (~3,200 lines)
 ├── prompts/           # LLM system prompts + tool schemas
 └── templates/         # Init templates (general, code, research, book)
 
-tests/                 # Test suite (~1,400 lines, 82 tests)
+tests/                 # Test suite (169 tests)
 scripts/               # Build scripts (bash + PowerShell)
 ```
 

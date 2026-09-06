@@ -18,7 +18,7 @@ from rich.table import Table
 
 from wikimind.config import ConfigError, load_config
 from wikimind.llm import LLMClient, LLMError
-from wikimind.retrieval import build_qmd_cmd, run_qmd_refresh
+from wikimind.retrieval import build_qmd_cmd, run_qmd_doctor, run_qmd_refresh
 from wikimind.wiki import WikiStore
 
 app = typer.Typer(
@@ -295,21 +295,26 @@ def init(
                     subprocess.run(
                         qmd_cmd + ["--index", project_name, "collection", "remove", project_name],
                         cwd=str(root),
+                        stdin=subprocess.DEVNULL,
                         capture_output=True,
                         timeout=30,
                         check=False,
                     )
                 # Pass the raw configured path (e.g. ".wiki/vault/") rather than
-                # the Python-resolved absolute path. Python's Path.resolve() follows
-                # symlinks, but qmd invoked via cmd /c cannot traverse the resolved
-                # symlink target. Passing the pre-resolution path lets qmd's Node.js
-                # follow symlinks itself (which works). Forward slashes are safe on
+                # the Python-resolved absolute path, so qmd records the collection
+                # root the user actually configured. Forward slashes are safe on
                 # all platforms for Node.js path handling.
+                #
+                # Note: since qmd 2.8.3 indexing is containment-checked — a file
+                # whose realpath falls outside the collection root is skipped as
+                # OUTSIDE_COLLECTION. A symlinked vault root still indexes, but
+                # individual pages symlinked to targets outside the vault do not.
                 qmd_wiki_path = wiki_rel_str.replace("\\", "/")
                 qmd_project_cmd = qmd_cmd + ["--index", project_name]
                 add_result = subprocess.run(
                     qmd_project_cmd + ["collection", "add", qmd_wiki_path, "--name", project_name],
                     cwd=str(root),
+                    stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -320,6 +325,7 @@ def init(
                     embed_result = subprocess.run(
                         qmd_project_cmd + ["embed"],
                         cwd=str(root),
+                        stdin=subprocess.DEVNULL,
                         capture_output=True,
                         text=True,
                         timeout=120,
@@ -331,6 +337,32 @@ def init(
                         console.print(
                             f"  [yellow]Warning:[/yellow] qmd embed failed: {embed_result.stderr.strip()[:200]}"
                         )
+
+                    # Pre-flight: surface a missing model cache or a broken index
+                    # now, instead of as a silent search timeout on first query.
+                    try:
+                        doctor = run_qmd_doctor(qmd_cmd, root, index_name=project_name)
+                    except (subprocess.TimeoutExpired, OSError):
+                        doctor = None
+                    if doctor is not None:
+                        # doctor exits 0 even when it reports problems, so key off
+                        # its own "Recommended next step" section rather than the
+                        # return code. ASCII marker — safe under any console codec.
+                        report = f"{doctor.stdout or ''}{doctor.stderr or ''}"
+                        marker = "Recommended next step"
+                        if marker in report:
+                            steps = [
+                                line.strip(" -	")
+                                for line in report.split(marker, 1)[1].splitlines()
+                                if line.strip(" -	")
+                            ]
+                            for step in steps[:3]:
+                                console.print(f"  [yellow]qmd doctor:[/yellow] {step[:200]}")
+                        elif doctor.returncode != 0:
+                            console.print(
+                                f"  [yellow]Warning:[/yellow] qmd doctor exited "
+                                f"{doctor.returncode}"
+                            )
                 else:
                     console.print(
                         f"  [yellow]Warning:[/yellow] qmd collection add failed: {add_result.stderr.strip()[:200]}"

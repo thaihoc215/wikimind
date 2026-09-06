@@ -13,7 +13,7 @@ pip install -e .           # install with editable mode
 pip install -e ".[dev]"    # add test deps
 pip install -e ".[pdf]"    # add optional PDF support
 
-pytest                     # run all 82 tests (no API keys needed — all LLM calls are mocked)
+pytest                     # run all 169 tests (no API keys needed — all LLM calls are mocked)
 ```
 
 Requires Python ≥ 3.11. Entry point: `wikimind.cli:app` (Typer).
@@ -84,6 +84,8 @@ All LLM responses go through `llm_schema.py` before any filesystem writes. Use t
 ## Test conventions
 
 - All tests use mocked LLM clients — no real API calls, no keys needed.
+- `tests/test_qmd_integration.py` is the exception: it runs the real qmd binary
+  (no models/network) to catch qmd CLI drift, and auto-skips when qmd is absent.
 - Shared fixtures in `tests/conftest.py`: `tmp_wiki` (fresh `WikiStore`), `sample_source` (markdown file), `mock_llm_ingest`, `mock_llm_query`.
 - `asyncio_mode = "auto"` — async tests work without explicit `@pytest.mark.asyncio`.
 - Tests assert on result dataclass fields (`.pages_created`, `.answer`, etc.) and filesystem state.

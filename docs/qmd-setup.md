@@ -20,8 +20,8 @@ just token overlap. See `docs/search-comparison.md` for the full decision matrix
 
 ## Where qmd Stores Data
 
-qmd is **fully global** — there is no per-project `.qmd/` folder. All storage is
-shared across all projects on the machine:
+By default qmd is **global** — config and index live in your home directory and
+are shared across every project on the machine:
 
 | What | Location |
 |---|---|
@@ -31,6 +31,16 @@ shared across all projects on the machine:
 
 `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` are respected if set. The env var `QMD_CONFIG_DIR`
 overrides the config location entirely.
+
+Two ways to scope storage per project:
+
+| Approach | Where it lives | How wikimind uses it |
+|---|---|---|
+| **Named index** — `qmd --index <name> ...` | `~/.config/qmd/<name>.yml` | **What wikimind does.** `init`, `ingest` and the MCP server all pass `--index <project.name>` automatically. |
+| **Project-local index** — `qmd init` | `.qmd/index.yml` + `.qmd/index.sqlite` in the project | Not used by wikimind. Note that a checked-in `.qmd/index.yml` is trust-gated (see [Trust and checked-in config](#trust-and-checked-in-config)). |
+
+Because wikimind uses a named index per project, each project's collection registry
+is a separate file and cross-project bleed is not possible by default.
 
 After setup you can inspect the state with:
 
@@ -78,7 +88,7 @@ This writes an entry to `~/.config/qmd/index.yml`. You can verify:
 
 ```bash
 qmd collection list
-qmd collection info my-project-wiki
+qmd collection show my-project-wiki
 ```
 
 ### Step 2 — Embed the vault
@@ -96,42 +106,42 @@ you need fresh embeddings immediately (wikimind handles this automatically — s
 ```toml
 [wiki]
 retrieval_backend = "qmd"
-qmd_mode          = "vsearch"    # "vsearch" | "query"
+qmd_mode          = "vsearch"    # "vsearch" | "query" | "search"
 qmd_bin           = "qmd"        # full path if qmd is not on PATH
+
+# Optional, only applied when qmd_mode = "query" (the only mode that reranks):
+# qmd_no_rerank       = true     # skip LLM reranking — much faster on CPU
+# qmd_candidate_limit = 20       # max candidates to rerank (qmd default: 40)
 ```
 
 ---
 
-## Multiple Projects: The Cross-Collection Problem
+## Multiple Projects: Search Scoping
 
-Because all collections share a single `~/.cache/qmd/index.sqlite`, running
-`qmd vsearch <query>` without a `-c` flag searches **all** registered collections
-by default (all entries in `index.yml` where `includeByDefault` is not `false`).
+Run bare `qmd vsearch <query>` and it searches **every** registered collection in
+that index (all entries where `includeByDefault` is not `false`). On a machine with
+several projects registered, that would mix other projects' pages into your results.
 
-wikimind's `QmdRetriever` currently does **not** pass `-c <collection-name>`, which
-means on a machine with multiple projects registered, search results will include
-pages from other projects' wikis.
+wikimind avoids this on two levels, with no setup on your part:
 
-### Workaround: exclude other collections from default search
+1. **`--index <project.name>`** — each project gets its own collection registry file
+   (`~/.config/qmd/<project>.yml`), so other projects are not even visible.
+2. **`-c <project.name>`** — `QmdRetriever` also scopes the search to the project's
+   own collection by name.
 
-```bash
-# Mark all collections you do NOT want included in default search
-qmd collection update other-project-wiki --exclude
-```
-
-This sets `includeByDefault: false` in `~/.config/qmd/index.yml` for that entry.
-Only collections without this flag are searched by default.
+If you register extra collections inside a project's index by hand, exclude the ones
+you do not want in unscoped searches:
 
 ```bash
-# Re-enable a collection for default search
-qmd collection update other-project-wiki --include
+qmd collection exclude other-collection   # sets includeByDefault: false
+qmd collection include other-collection   # re-enable
 ```
 
 ### Verify scope
 
 ```bash
 # Confirm only the right collection is searched from any directory
-qmd vsearch "test query" --json
+qmd --index my-project vsearch "test query" --format json
 ```
 
 Check that returned `file` URIs are all under `qmd://<your-collection-name>/`.
@@ -157,7 +167,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 [wiki]
 required_frontmatter = ["title", "type", "tags", "created", "updated"]
 retrieval_backend    = "qmd"
-qmd_mode             = "vsearch"   # "vsearch" | "query"
+qmd_mode             = "vsearch"   # "vsearch" | "query" | "search"
 qmd_bin              = "qmd"       # full path if not on PATH
 
 [wiki.categories]
@@ -225,6 +235,39 @@ of wikimind entirely.
 
 ---
 
+## Trust and Checked-in Config
+
+Since qmd 2.8.3, a project-local `.qmd/index.yml` — the kind that travels with a
+`git clone` — is **not trusted automatically**. Three fields in it can reach outside
+the project and are gated:
+
+- `update` — a bash command qmd would run on your machine
+- `collections.*.path` — pointing outside the project directory
+- `models.embed` / `models.rerank` / `models.generate` — non-default model URIs
+
+On a terminal, qmd lists the gated fields and asks; approvals are recorded in
+`~/.config/qmd/trusted.json`. **With no terminal — agents, CI, and the wikimind MCP
+server — those fields are skipped** and in-project indexing continues.
+
+```bash
+qmd trust           # review and approve this project's gated fields
+qmd trust list      # show every approved project config
+qmd trust revoke    # drop the approval for this project
+```
+
+Set `QMD_TRUST_LOCAL_CONFIG=1` for CI that should allow them unattended.
+
+**This does not affect wikimind's normal operation.** wikimind writes to a *named*
+index (`~/.config/qmd/<project>.yml`), and your own `~/.config/qmd/*.yml` files are
+never gated. Every qmd subprocess wikimind spawns also runs with stdin closed, so a
+trust prompt can never block it — the gated fields are simply skipped.
+
+The one thing to know: if your project has its own checked-in `.qmd/index.yml` and
+you expect its `update` hook or an out-of-project collection path to work, run
+`qmd trust` once by hand. wikimind will not do it for you.
+
+---
+
 ## Troubleshooting
 
 **qmd binary not found**
@@ -244,7 +287,8 @@ qmd_bin = "/usr/local/bin/qmd"
 
 - Verify the collection is registered: `qmd collection list`
 - Run `qmd embed` and confirm it processes files (not an early "all embedded" exit)
-- Run `qmd vsearch "test" --json` manually to see raw output
+- Run `qmd doctor` to check the index and model cache
+- Run `qmd vsearch "test" --format json` manually to see raw output
 
 **First search times out / hangs**
 
@@ -254,8 +298,8 @@ the wikimind MCP server. The 60s timeout in `QmdRetriever` is not enough for a
 
 **Results contain pages from other projects**
 
-Other collections are included in default search. Exclude them:
+Other collections in the same index are included in unscoped search. Exclude them:
 
 ```bash
-qmd collection update other-project-name --exclude
+qmd collection exclude other-collection-name
 ```
