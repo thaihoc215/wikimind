@@ -24,8 +24,9 @@ Follow this default order (wiki-first):
 4. **Write to the wiki only on explicit user request.** Do not save answers,
    discoveries, analyses, or code-change notes unless the user asks.
 5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
-6. **When explicitly asked to save or update wiki content**, update affected pages (`wiki_write_page`),
-   and update the index if needed (`wiki_update_index`).
+6. **When explicitly asked to save or update wiki content**, always go through the wiki MCP tools —
+   `wiki_write_page`, `wiki_move_page` (move/rename), `wiki_delete_page`, `wiki_update_index` — never
+   `mv`/`sed`/`cat >>` or plain file writes: only these refresh the search index.
 7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
 8. If paths are customized in `wikimind.toml`, always follow configured paths.
 9. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
