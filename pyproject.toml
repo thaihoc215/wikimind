@@ -10,7 +10,7 @@ dependencies = [
     "anthropic>=0.40",
     "python-frontmatter>=1.1",
     "python-slugify>=8.0",
-    "mcp>=1.0",
+    "mcp>=1.0,<2",  # mcp 2.x renamed FastMCP -> MCPServer
 ]
 
 [project.optional-dependencies]
