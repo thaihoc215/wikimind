@@ -203,6 +203,25 @@ def test_bundled_templates_make_writes_explicit_opt_in():
         assert "save durable outputs" not in content
 
 
+def _assert_wiki_reads_are_opt_in(content: str) -> None:
+    assert "Do not consult the wiki by default." in content
+    assert "wiki-first" not in content
+    assert "READ THIS FIRST" not in content
+
+
+def test_default_wikimind_section_makes_reads_opt_in():
+    _assert_wiki_reads_are_opt_in(_default_wikimind_section())
+
+
+def test_bundled_templates_make_reads_opt_in():
+    templates_dir = Path(cli_module.__file__).parent / "templates"
+    template_files = sorted(templates_dir.glob("*/CLAUDE.md"))
+
+    assert template_files
+    for template_file in template_files:
+        _assert_wiki_reads_are_opt_in(template_file.read_text(encoding="utf-8"))
+
+
 class _DummyLLM:
     def token_summary(self):
         return {

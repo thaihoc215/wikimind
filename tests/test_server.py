@@ -66,6 +66,14 @@ def test_server_instructions_make_writes_explicit_opt_in(tmp_path: Path):
     assert "update the wiki after analysis or discoveries" not in server.instructions
 
 
+def test_server_instructions_make_reads_opt_in(tmp_path: Path):
+    _setup_project(tmp_path)
+    server = create_server(tmp_path)
+
+    assert "do not read the wiki by default" in server.instructions
+    assert "Read wiki/index.md first" not in server.instructions
+
+
 def test_server_write_and_read_page(tmp_path: Path):
     _setup_project(tmp_path)
     server = create_server(tmp_path)
