@@ -5,7 +5,7 @@ This project uses a persistent wiki in `.wiki/vault/` maintained by LLMs.
 
 ## Structure
 
-- `.wiki/vault/index.md` — Master catalog of all wiki pages. **READ THIS FIRST.**
+- `.wiki/vault/index.md` — Master catalog of all wiki pages. Start here when the user asks you to use the wiki.
 - `.wiki/vault/log.md` — Chronological record of all wiki changes.
 - `.wiki/vault/overview.md` — High-level codebase overview.
 - `.wiki/vault/modules/` — Source files, classes, functions, components.
@@ -19,21 +19,24 @@ This project uses a persistent wiki in `.wiki/vault/` maintained by LLMs.
 - `.wiki/vault/analyses/` — Saved query answers, comparisons, syntheses.
 - `.wiki/raw/` — Raw source documents. **Immutable — never modify these.**
 
-## When working on this project
+## When to use the wiki
 
-Follow this default order (wiki-first):
+The wiki is **opt-in**: interact with WikiMind only when the user asks for it
+(e.g. they mention the wiki / WikiMind, ask to look something up in it, or ask to save or update it).
 
-1. **Before deep-diving into source files or broad code search**, use `wiki_search` first.
-2. **If relevant wiki pages exist**, read them with `wiki_read_page` and answer from wiki context.
-3. **Only read raw/source files when needed** (wiki is missing details, outdated, or exact code is required).
+1. **Do not consult the wiki by default.** For ordinary tasks, work directly from the source code
+   and project files — do not call `wiki_search`, `wiki_read_index`, or `wiki_read_page` unless the user asks.
+2. **When the user asks you to use the wiki**, search it with `wiki_search`, read relevant pages with
+   `wiki_read_page`, and fall back to source files only if the wiki is missing details or outdated.
+3. **When answering from the wiki**, cite wiki pages with [[wikilinks]].
 4. **Write to the wiki only on explicit user request.** Do not save answers,
    discoveries, analyses, or code-change notes unless the user asks.
-5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
-6. **When explicitly asked to save or update wiki content**, update affected pages (`wiki_write_page`),
-   and update the index if needed (`wiki_update_index`).
-7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
-8. If paths are customized in `wikimind.toml`, always follow configured paths.
-9. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
+5. **When explicitly asked to save or update wiki content**, always go through the wiki MCP tools —
+   `wiki_write_page`, `wiki_move_page` (move/rename), `wiki_delete_page`, `wiki_update_index` — never
+   `mv`/`sed`/`cat >>` or plain file writes: only these refresh the search index.
+6. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
+7. If paths are customized in `wikimind.toml`, always follow configured paths.
+8. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
 
 ## Wiki page format
 

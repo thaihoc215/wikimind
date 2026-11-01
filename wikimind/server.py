@@ -127,9 +127,11 @@ def create_server(root: Path | None = None) -> FastMCP:
     mcp = FastMCP(
         "wikimind",
         instructions=(
-            "WikiMind wiki tools. Read wiki/index.md first to understand what "
-            "pages exist, then read specific pages for details. Write to the "
-            "wiki only on explicit user request."
+            "WikiMind wiki tools. Use them only when the user asks to consult "
+            "or update the wiki — do not read the wiki by default. When asked, "
+            "read wiki/index.md or use wiki_search to find pages, then read "
+            "specific pages for details. Write to the wiki only on explicit "
+            "user request."
         ),
     )
 

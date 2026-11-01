@@ -218,6 +218,35 @@ def run_qmd_refresh(
     return update_result, embed_result
 
 
+def run_qmd_doctor(
+    qmd_cmd: list[str],
+    root: Path,
+    *,
+    index_name: str | None = None,
+    timeout: int = 60,
+) -> subprocess.CompletedProcess | None:
+    """Run `qmd doctor` for index/runtime diagnostics (qmd >= 2.5.0).
+
+    Returns None if the installed qmd is too old to have the command, so
+    callers can silently skip the check on older installs.
+    """
+    result = subprocess.run(
+        _with_qmd_index(qmd_cmd, index_name) + ["doctor"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(root),
+        timeout=timeout,
+        check=False,
+    )
+    combined = f"{result.stdout or ''}{result.stderr or ''}".lower()
+    if result.returncode != 0 and ("unknown command" in combined or "usage:" in combined):
+        return None
+    return result
+
+
 class QmdRetriever:
     """Retriever that delegates to the qmd CLI for hybrid/semantic search.
 
@@ -241,6 +270,8 @@ class QmdRetriever:
         root: Path | None = None,
         index_name: str | None = None,
         collection_name: str | None = None,
+        no_rerank: bool = False,
+        candidate_limit: int | None = None,
     ):
         if mode not in self.VALID_MODES:
             raise RetrievalError(
@@ -253,6 +284,8 @@ class QmdRetriever:
         self.root = root or store.wiki_path.parent
         self.index_name = index_name
         self.collection_name = collection_name
+        self.no_rerank = no_rerank
+        self.candidate_limit = candidate_limit
         self._cmd_prefix: list[str] | None = None  # lazily resolved
 
     def _build_cmd_prefix(self) -> list[str]:
@@ -289,9 +322,17 @@ class QmdRetriever:
 
         try:
             cmd = _with_qmd_index(self._cmd_prefix, self.index_name)
-            cmd += [self.mode, query, "--json"]
+            # --format json supersedes the legacy --json alias (qmd >= 2.5.3).
+            cmd += [self.mode, query, "--format", "json"]
             if self.collection_name:
                 cmd += ["-c", self.collection_name]
+            # Reranking only runs in hybrid "query" mode; the flags are a no-op
+            # (or unknown) elsewhere, so only pass them where they apply.
+            if self.mode == "query":
+                if self.no_rerank:
+                    cmd += ["--no-rerank"]
+                if self.candidate_limit is not None:
+                    cmd += ["-C", str(self.candidate_limit)]
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -345,16 +386,29 @@ class QmdRetriever:
     def _parse_file_uri(self, file_uri: str) -> str:
         """Strip qmd://collection/ prefix to get wiki-relative path.
 
-        qmd returns URIs like 'qmd://wiki/analyses/foo.md'.
-        We strip everything up to and including the second slash after 'qmd://'
-        to get the wiki-relative path 'analyses/foo.md'.
+        qmd returns URIs like 'qmd://wiki/analyses/foo.md'. We strip everything
+        up to and including the second slash after 'qmd://' to get the
+        wiki-relative path 'analyses/foo.md'.
+
+        qmd also appends a '?index=<name>' query string when a named index is in
+        use ('qmd://wiki/analyses/foo.md?index=wiki'). It must be stripped before
+        the result is joined onto wiki_path, or the file lookup misses and the
+        result is silently dropped.
         """
-        if file_uri.startswith("qmd://"):
-            without_scheme = file_uri[6:]  # drop "qmd://"
+        path = file_uri
+        if path.startswith("qmd://"):
+            without_scheme = path[6:]  # drop "qmd://"
             slash = without_scheme.find("/")
             if slash >= 0:
-                return without_scheme[slash + 1:]
-        return file_uri
+                path = without_scheme[slash + 1:]
+
+        # Drop any ?query / #fragment qmd tacked on.
+        for separator in ("?", "#"):
+            cut = path.find(separator)
+            if cut >= 0:
+                path = path[:cut]
+
+        return path
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9_]+", re.IGNORECASE)
@@ -380,6 +434,8 @@ def make_retriever(
     if normalized in {"qmd"}:
         qmd_bin = (wiki_config.qmd_bin if wiki_config else None) or "qmd"
         qmd_mode = (wiki_config.qmd_mode if wiki_config else None) or "vsearch"
+        no_rerank = bool(wiki_config.qmd_no_rerank) if wiki_config else False
+        candidate_limit = wiki_config.qmd_candidate_limit if wiki_config else None
         if not shutil.which(qmd_bin):
             warnings.warn(
                 f"qmd binary {qmd_bin!r} not found on PATH. "
@@ -394,6 +450,8 @@ def make_retriever(
             root=root,
             index_name=index_name,
             collection_name=collection_name,
+            no_rerank=no_rerank,
+            candidate_limit=candidate_limit,
         )
 
     raise RetrievalError(

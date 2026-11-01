@@ -18,7 +18,7 @@ from rich.table import Table
 
 from wikimind.config import ConfigError, load_config
 from wikimind.llm import LLMClient, LLMError
-from wikimind.retrieval import build_qmd_cmd, run_qmd_refresh
+from wikimind.retrieval import build_qmd_cmd, run_qmd_doctor, run_qmd_refresh
 from wikimind.wiki import WikiStore
 
 app = typer.Typer(
@@ -295,21 +295,26 @@ def init(
                     subprocess.run(
                         qmd_cmd + ["--index", project_name, "collection", "remove", project_name],
                         cwd=str(root),
+                        stdin=subprocess.DEVNULL,
                         capture_output=True,
                         timeout=30,
                         check=False,
                     )
                 # Pass the raw configured path (e.g. ".wiki/vault/") rather than
-                # the Python-resolved absolute path. Python's Path.resolve() follows
-                # symlinks, but qmd invoked via cmd /c cannot traverse the resolved
-                # symlink target. Passing the pre-resolution path lets qmd's Node.js
-                # follow symlinks itself (which works). Forward slashes are safe on
+                # the Python-resolved absolute path, so qmd records the collection
+                # root the user actually configured. Forward slashes are safe on
                 # all platforms for Node.js path handling.
+                #
+                # Note: since qmd 2.8.3 indexing is containment-checked — a file
+                # whose realpath falls outside the collection root is skipped as
+                # OUTSIDE_COLLECTION. A symlinked vault root still indexes, but
+                # individual pages symlinked to targets outside the vault do not.
                 qmd_wiki_path = wiki_rel_str.replace("\\", "/")
                 qmd_project_cmd = qmd_cmd + ["--index", project_name]
                 add_result = subprocess.run(
                     qmd_project_cmd + ["collection", "add", qmd_wiki_path, "--name", project_name],
                     cwd=str(root),
+                    stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -320,6 +325,7 @@ def init(
                     embed_result = subprocess.run(
                         qmd_project_cmd + ["embed"],
                         cwd=str(root),
+                        stdin=subprocess.DEVNULL,
                         capture_output=True,
                         text=True,
                         timeout=120,
@@ -331,6 +337,32 @@ def init(
                         console.print(
                             f"  [yellow]Warning:[/yellow] qmd embed failed: {embed_result.stderr.strip()[:200]}"
                         )
+
+                    # Pre-flight: surface a missing model cache or a broken index
+                    # now, instead of as a silent search timeout on first query.
+                    try:
+                        doctor = run_qmd_doctor(qmd_cmd, root, index_name=project_name)
+                    except (subprocess.TimeoutExpired, OSError):
+                        doctor = None
+                    if doctor is not None:
+                        # doctor exits 0 even when it reports problems, so key off
+                        # its own "Recommended next step" section rather than the
+                        # return code. ASCII marker — safe under any console codec.
+                        report = f"{doctor.stdout or ''}{doctor.stderr or ''}"
+                        marker = "Recommended next step"
+                        if marker in report:
+                            steps = [
+                                line.strip(" -	")
+                                for line in report.split(marker, 1)[1].splitlines()
+                                if line.strip(" -	")
+                            ]
+                            for step in steps[:3]:
+                                console.print(f"  [yellow]qmd doctor:[/yellow] {step[:200]}")
+                        elif doctor.returncode != 0:
+                            console.print(
+                                f"  [yellow]Warning:[/yellow] qmd doctor exited "
+                                f"{doctor.returncode}"
+                            )
                 else:
                     console.print(
                         f"  [yellow]Warning:[/yellow] qmd collection add failed: {add_result.stderr.strip()[:200]}"
@@ -637,7 +669,7 @@ This project uses a persistent wiki in `.wiki/vault/` maintained by LLMs.
 
 ## Structure
 
-- `.wiki/vault/index.md` — Master catalog of all wiki pages. **READ THIS FIRST.**
+- `.wiki/vault/index.md` — Master catalog of all wiki pages. Start here when the user asks you to use the wiki.
 - `.wiki/vault/log.md` — Chronological record of all wiki changes.
 - `.wiki/vault/overview.md` — High-level codebase overview.
 - `.wiki/vault/modules/` — Source files, classes, functions, components.
@@ -648,21 +680,24 @@ This project uses a persistent wiki in `.wiki/vault/` maintained by LLMs.
 - `.wiki/vault/analyses/` — Saved query answers, comparisons, syntheses.
 - `.wiki/raw/` — Raw source documents. **Immutable — never modify these.**
 
-## When working on this project
+## When to use the wiki
 
-Follow this default order (wiki-first):
+The wiki is **opt-in**: interact with WikiMind only when the user asks for it
+(e.g. they mention the wiki / WikiMind, ask to look something up in it, or ask to save or update it).
 
-1. **Before deep-diving into source files or broad code search**, use `wiki_search` first.
-2. **If relevant wiki pages exist**, read them with `wiki_read_page` and answer from wiki context.
-3. **Only read raw/source files when needed** (wiki is missing details, outdated, or exact code is required).
+1. **Do not consult the wiki by default.** For ordinary tasks, work directly from the source code
+   and project files — do not call `wiki_search`, `wiki_read_index`, or `wiki_read_page` unless the user asks.
+2. **When the user asks you to use the wiki**, search it with `wiki_search`, read relevant pages with
+   `wiki_read_page`, and fall back to source files only if the wiki is missing details or outdated.
+3. **When answering from the wiki**, cite wiki pages with [[wikilinks]].
 4. **Write to the wiki only on explicit user request.** Do not save answers,
    discoveries, analyses, or code-change notes unless the user asks.
-5. **When answering**, cite wiki pages with [[wikilinks]] whenever possible.
-6. **When explicitly asked to save or update wiki content**, update affected pages (`wiki_write_page`),
-   and update the index if needed (`wiki_update_index`).
-7. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
-8. If paths are customized in `wikimind.toml`, always follow configured paths.
-9. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
+5. **When explicitly asked to save or update wiki content**, always go through the wiki MCP tools —
+   `wiki_write_page`, `wiki_move_page` (move/rename), `wiki_delete_page`, `wiki_update_index` — never
+   `mv`/`sed`/`cat >>` or plain file writes: only these refresh the search index.
+6. **After ingesting new sources**, run `wikimind lint` (and `wikimind lint --semantic` when needed).
+7. If paths are customized in `wikimind.toml`, always follow configured paths.
+8. Never modify raw source documents in `.wiki/raw/`; treat them as immutable.
 
 ## Wiki page format
 

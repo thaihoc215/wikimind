@@ -48,6 +48,9 @@ class WikiConfig:
     retrieval_backend: str = "qmd"
     qmd_mode: str = "vsearch"
     qmd_bin: str = "qmd"
+    # Only applied in qmd_mode = "query" (the only mode that reranks).
+    qmd_no_rerank: bool = False
+    qmd_candidate_limit: int | None = None
     categories: dict[str, str] = field(
         default_factory=lambda: {
             "entities": "People, organizations, tools, systems",
@@ -127,6 +130,8 @@ def load_config(root: Path | None = None) -> Config:
         retrieval_backend=wiki_data.get("retrieval_backend", "bm25"),
         qmd_mode=wiki_data.get("qmd_mode", "vsearch"),
         qmd_bin=wiki_data.get("qmd_bin", "qmd"),
+        qmd_no_rerank=bool(wiki_data.get("qmd_no_rerank", False)),
+        qmd_candidate_limit=wiki_data.get("qmd_candidate_limit"),
         categories=wiki_data.get(
             "categories",
             {
