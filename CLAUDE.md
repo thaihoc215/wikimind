@@ -13,7 +13,7 @@ pip install -e .           # install with editable mode
 pip install -e ".[dev]"    # add test deps
 pip install -e ".[pdf]"    # add optional PDF support
 
-pytest                     # run all 169 tests (no API keys needed — all LLM calls are mocked)
+pytest                     # run all 180 tests (no API keys needed — all LLM calls are mocked)
 ```
 
 Requires Python ≥ 3.11. Entry point: `wikimind.cli:app` (Typer).
@@ -24,7 +24,7 @@ Requires Python ≥ 3.11. Entry point: `wikimind.cli:app` (Typer).
 
 ```
 wikimind/
-├── cli.py          # Typer CLI — 8 commands, each loads config → WikiStore + LLMClient + Retriever → operation
+├── cli.py          # Typer CLI — 10 commands, each loads config → WikiStore + LLMClient + Retriever → operation
 ├── config.py       # TOML loader → typed dataclasses (ProjectConfig, LLMConfig, WikiConfig, PathsConfig)
 ├── wiki.py         # WikiStore — ALL filesystem ops (read/write pages, index, log, dedup via SHA256)
 ├── llm.py          # LLMClient + ProviderAdapter (Anthropic / OpenAI / Ollama) — all return (json, in_tok, out_tok)
@@ -124,6 +124,12 @@ wikimind generate --tool vscode     # Creates/updates .vscode/mcp.json for Copil
 ```
 
 See [[analyses/generate-command]] in the wiki for full details.
+
+To refresh only the `<!-- wikimind:start/end -->` section of `CLAUDE.md` / `AGENTS.md` /
+`.github/copilot-instructions.md` after template changes, use `wikimind sync-instructions`
+(template + name read from `wikimind.toml`; no scaffolding or qmd side effects). Edit the
+templates in `wikimind/templates/*/CLAUDE.md` *and* `_default_wikimind_section()` in `cli.py`
+together — both feed generated instructions.
 
 ---
 

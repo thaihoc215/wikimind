@@ -164,6 +164,143 @@ def test_init_with_markers_replaces_without_force(tmp_path: Path, monkeypatch):
     assert "entities/" not in content  # general content replaced
 
 
+# ── sync-instructions ─────────────────────────────────────────────────────────
+
+
+def _write_project_toml(root: Path, name: str = "Proj", template: str = "code") -> None:
+    (root / "wikimind.toml").write_text(
+        f'[project]\nname = "{name}"\ntemplate = "{template}"\n',
+        encoding="utf-8",
+    )
+
+
+def _marked(body: str) -> str:
+    return f"{_WIKIMIND_START}\n{body}\n{_WIKIMIND_END}\n"
+
+
+def test_sync_instructions_uses_template_and_name_from_toml(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_project_toml(tmp_path)
+    claude = tmp_path / "CLAUDE.md"
+    claude.write_text("# Mine\n\n" + _marked("old wiki section") + "\nmy footer\n", encoding="utf-8")
+
+    result = runner.invoke(cli_module.app, ["sync-instructions"])
+
+    assert result.exit_code == 0, result.output
+    content = claude.read_text(encoding="utf-8")
+    assert "old wiki section" not in content
+    assert "WikiMind Knowledge Base — Proj" in content
+    assert ".wiki/vault/modules/" in content  # code template, not general
+    assert "Do not consult the wiki by default." in content
+    assert content.startswith("# Mine")
+    assert "my footer" in content
+    # Instruction files only — no scaffolding side effects.
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["CLAUDE.md", "wikimind.toml"]
+
+
+def test_sync_instructions_defaults_without_toml(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli_module.app, ["sync-instructions"])
+
+    assert result.exit_code == 0, result.output
+    content = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    assert f"WikiMind Knowledge Base — {tmp_path.name}" in content
+    assert ".wiki/vault/entities/" in content  # general template
+
+
+def test_sync_instructions_updates_existing_agents_and_copilot(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_project_toml(tmp_path)
+    (tmp_path / "AGENTS.md").write_text(_marked("stale agents"), encoding="utf-8")
+    (tmp_path / ".github").mkdir()
+    copilot = tmp_path / ".github" / "copilot-instructions.md"
+    copilot.write_text("keep me\n\n" + _marked("stale copilot"), encoding="utf-8")
+
+    result = runner.invoke(cli_module.app, ["sync-instructions"])
+
+    assert result.exit_code == 0, result.output
+    for path in (tmp_path / "CLAUDE.md", tmp_path / "AGENTS.md", copilot):
+        content = path.read_text(encoding="utf-8")
+        assert "stale" not in content
+        assert "Do not consult the wiki by default." in content
+    assert copilot.read_text(encoding="utf-8").startswith("keep me")
+
+
+def test_sync_instructions_skips_missing_agents_and_copilot_by_default(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    _write_project_toml(tmp_path)
+
+    result = runner.invoke(cli_module.app, ["sync-instructions"])
+
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert not (tmp_path / ".github").exists()
+
+
+def test_sync_instructions_target_limits_files_and_creates_missing(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    _write_project_toml(tmp_path)
+    claude = tmp_path / "CLAUDE.md"
+    claude.write_text(_marked("untouched claude"), encoding="utf-8")
+
+    result = runner.invoke(cli_module.app, ["sync-instructions", "--target", "agents"])
+
+    assert result.exit_code == 0, result.output
+    assert "untouched claude" in claude.read_text(encoding="utf-8")
+    assert "Do not consult the wiki by default." in (tmp_path / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_sync_instructions_template_option_overrides_toml(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_project_toml(tmp_path, template="code")
+
+    result = runner.invoke(cli_module.app, ["sync-instructions", "--template", "research"])
+
+    assert result.exit_code == 0, result.output
+    content = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+    research = (Path(cli_module.__file__).parent / "templates" / "research" / "CLAUDE.md").read_text(
+        encoding="utf-8"
+    )
+    assert research.replace("{{PROJECT_NAME}}", "Proj") in content
+
+
+def test_sync_instructions_old_format_needs_force(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_project_toml(tmp_path)
+    claude = tmp_path / "CLAUDE.md"
+    claude.write_text("# Mine\n\n---\n\n# WikiMind Knowledge Base\nold content", encoding="utf-8")
+
+    skipped = runner.invoke(cli_module.app, ["sync-instructions"])
+    assert skipped.exit_code == 0, skipped.output
+    assert "Skipped" in skipped.output
+    assert "old content" in claude.read_text(encoding="utf-8")
+
+    forced = runner.invoke(cli_module.app, ["sync-instructions", "--force"])
+    assert forced.exit_code == 0, forced.output
+    content = claude.read_text(encoding="utf-8")
+    assert "old content" not in content
+    assert content.startswith("# Mine")
+    assert _WIKIMIND_START in content
+
+
+def test_sync_instructions_rejects_unknown_target_and_template(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    bad_target = runner.invoke(cli_module.app, ["sync-instructions", "--target", "gemini"])
+    bad_template = runner.invoke(cli_module.app, ["sync-instructions", "--template", "nope"])
+
+    assert bad_target.exit_code != 0
+    assert bad_template.exit_code != 0
+    assert not (tmp_path / "CLAUDE.md").exists()
+
+
 def test_init_registers_qmd_collection_in_project_index(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli_module, "build_qmd_cmd", lambda qmd_bin: ["qmd"])
