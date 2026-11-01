@@ -761,6 +761,111 @@ def generate(
         raise typer.Exit(1)
 
 
+# ── sync-instructions ─────────────────────────────────────────────────────────
+
+# target → path relative to the project root
+_INSTRUCTION_TARGETS = {
+    "claude": Path("CLAUDE.md"),
+    "agents": Path("AGENTS.md"),
+    "copilot": Path(".github") / "copilot-instructions.md",
+}
+
+
+@app.command("sync-instructions")
+def sync_instructions(
+    target: list[str] = typer.Option(
+        None,
+        "--target",
+        help="File to sync: claude | agents | copilot (repeatable). "
+        "Default: CLAUDE.md, plus AGENTS.md / copilot-instructions.md if they exist.",
+    ),
+    template: str = typer.Option(
+        None,
+        "--template",
+        help="Template to render. Default: \\[project].template in wikimind.toml, else general.",
+    ),
+    name: str = typer.Option(
+        None,
+        "--name",
+        help="Project name. Default: \\[project].name in wikimind.toml, else directory name.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Also replace old-format WikiMind sections that have no "
+        "<!-- wikimind:start/end --> markers.",
+    ),
+):
+    """Regenerate only the WikiMind section of agent instruction files.
+
+    Replaces the content between the <!-- wikimind:start/end --> markers with
+    the current template. Nothing else is touched: no directories, wiki pages,
+    .mcp.json, or qmd collections.
+    """
+    root = Path.cwd()
+
+    unknown = [t for t in target or [] if t not in _INSTRUCTION_TARGETS]
+    if unknown:
+        console.print(
+            f"[red]Unknown target:[/red] {', '.join(unknown)}. "
+            f"Available: {', '.join(_INSTRUCTION_TARGETS)}"
+        )
+        raise typer.Exit(1)
+
+    project_cfg: dict = {}
+    config_path = root / "wikimind.toml"
+    if config_path.exists():
+        try:
+            project_cfg = tomllib.loads(config_path.read_text(encoding="utf-8")).get(
+                "project", {}
+            )
+        except tomllib.TOMLDecodeError as exc:
+            console.print(f"[red]Could not parse wikimind.toml:[/red] {exc}")
+            raise typer.Exit(1)
+
+    template = template or project_cfg.get("template") or "general"
+    template_file = TEMPLATES_DIR / template / "CLAUDE.md"
+    if not template_file.exists():
+        console.print(
+            f"[red]Template '{template}' not found.[/red] "
+            f"Available: {', '.join(d.name for d in TEMPLATES_DIR.iterdir() if d.is_dir())}"
+        )
+        raise typer.Exit(1)
+
+    project_name = name or project_cfg.get("name") or root.name
+    section = (
+        template_file.read_text(encoding="utf-8")
+        .replace("{{PROJECT_NAME}}", project_name)
+        .replace("{{DATE}}", datetime.now().strftime("%Y-%m-%d"))
+    )
+
+    # Explicit targets are created if missing; by default only CLAUDE.md is,
+    # and the other files are refreshed only when the project already uses them.
+    if target:
+        selected = list(dict.fromkeys(target))
+    else:
+        selected = ["claude"] + [
+            t for t in ("agents", "copilot") if (root / _INSTRUCTION_TARGETS[t]).exists()
+        ]
+
+    for key in selected:
+        rel = _INSTRUCTION_TARGETS[key]
+        label = rel.as_posix()
+        dest = root / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        status = _update_claude_md(dest, section, force=force)
+        if status == "skipped":
+            console.print(
+                f"  [dim]Skipped[/dim]  {label} (old-format WikiMind section without markers — use --force to replace)"
+            )
+        elif status == "merged":
+            console.print(f"  [yellow]Merged[/yellow]   {label} (WikiMind section appended)")
+        else:
+            console.print(
+                f"  [green]{status.capitalize()}[/green]  {label} ('{template}' template)"
+            )
+
+
 # ── ingest ────────────────────────────────────────────────────────────────────
 
 

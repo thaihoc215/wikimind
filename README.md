@@ -258,6 +258,35 @@ Existing keys in `opencode.json` (themes, other MCP servers, etc.) are preserved
 
 ---
 
+### `wikimind sync-instructions`
+
+```bash
+wikimind sync-instructions                       # CLAUDE.md (+ AGENTS.md / copilot-instructions.md if present)
+wikimind sync-instructions --target agents       # only AGENTS.md (created if missing)
+wikimind sync-instructions --target claude --target agents
+wikimind sync-instructions --template code       # override the template from wikimind.toml
+wikimind sync-instructions --force               # also replace old-format sections without markers
+```
+
+Regenerates **only** the WikiMind section of agent instruction files from the
+current template — use it after upgrading WikiMind to pick up new instructions.
+Content between `<!-- wikimind:start -->` and `<!-- wikimind:end -->` is replaced;
+everything outside the markers is preserved. It creates no directories, wiki pages,
+`.mcp.json`, or qmd collections.
+
+| Target | File |
+|--------|------|
+| `claude` | `CLAUDE.md` |
+| `agents` | `AGENTS.md` |
+| `copilot` | `.github/copilot-instructions.md` |
+
+Without `--target`, `CLAUDE.md` is always written and the other two are refreshed only if
+they already exist. Template and project name come from `[project].template` /
+`[project].name` in `wikimind.toml` (fallback: `general` / directory name); unlike
+`wikimind init`, you don't need to repeat `--template`.
+
+---
+
 ### `wikimind ingest`
 
 ```bash
